@@ -25,7 +25,8 @@
 
 #define SI5351a_CLK_SRC_PLL_A	0x00
 #define SI5351a_CLK_SRC_PLL_B	0x20
-#define SI5351_PLL_FREQ	      900000000uL
+// Use VCO value for max 800MHz max internal PLL frequency. The 900Mhz may often be unstable.
+#define SI5351_PLL_FREQ	      800000000uL
 extern unsigned long XTAL_FREQ = 25000000;   //Crystal frequency
 
 void SI5351_I2C_Init(void)
