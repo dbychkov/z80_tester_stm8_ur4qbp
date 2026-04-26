@@ -7,6 +7,8 @@
  * Original Author: UR4QBP
  * Created: 05/08/2025
  *
+ * Version: 1.0
+ *
  * Change Log:
  * - 05/08/2025 UR4QBP:		Initial version.
  * - 04/25/2026 dbychkov:	Added source code to GitHub.
@@ -15,6 +17,10 @@
  * - 04/25/2026 dbychkov:	Added power-on I2C check&reset to main.c to handle SI5351A startup issues.
  * - 04/25/2026 dbychkov:	Added PLL lock wait function to main.c to ensure stable clock output before releasing Z80 reset.
  * - 04/25/2026 dbychkov:	Added comments and documentation for clarity.
+ * - 04/25/2026 dbychkov:	Standardized indentation to 4-space across all root source files.
+ * - 04/25/2026 dbychkov:	Translated all Russian comments to English in main.c and Si5351_i2c.h.
+ * - 04/25/2026 dbychkov:	Added firmware version macros (FIRMWARE_VERSION_MAJOR/MINOR) to main.h.
+ *
  */
 
 #include "stm8s.h"
