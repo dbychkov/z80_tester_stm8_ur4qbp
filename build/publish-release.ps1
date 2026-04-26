@@ -26,6 +26,8 @@
         Optional flags:
             -Draft        Create a draft GitHub release
             -SkipBuild    Skip STVD build and only publish existing artifacts
+            -SkipPublish  Skip GitHub release publishing step
+            -Preflight    Validate prerequisites and inputs, then exit
             -AllowDirty   Allow uncommitted changes in working tree
 
         Optional file parameters:
@@ -52,6 +54,8 @@ param(
 
     [switch]$Draft,
     [switch]$SkipBuild,
+    [switch]$SkipPublish,
+    [switch]$Preflight,
     [switch]$AllowDirty
 )
 
@@ -80,7 +84,9 @@ function Resolve-StvdPath {
 
     $candidates = @(
         "C:\Program Files (x86)\STMicroelectronics\st_toolset\stvd\STVD.exe",
-        "C:\Program Files\STMicroelectronics\st_toolset\stvd\STVD.exe"
+        "C:\Program Files\STMicroelectronics\st_toolset\stvd\STVD.exe",
+        "C:\Program Files (x86)\STMicroelectronics\st_toolset\stvd\stvdebug.exe",
+        "C:\Program Files\STMicroelectronics\st_toolset\stvd\stvdebug.exe"
     )
 
     foreach ($path in $candidates) {
@@ -89,12 +95,17 @@ function Resolve-StvdPath {
         }
     }
 
-    $fromPath = Get-Command STVD.exe -ErrorAction SilentlyContinue
-    if ($fromPath) {
-        return $fromPath.Source
+    $fromPathStvd = Get-Command STVD.exe -ErrorAction SilentlyContinue
+    if ($fromPathStvd) {
+        return $fromPathStvd.Source
     }
 
-    throw "STVD.exe not found. Pass -StvdExePath explicitly or add STVD.exe to PATH."
+    $fromPathStvDebug = Get-Command stvdebug.exe -ErrorAction SilentlyContinue
+    if ($fromPathStvDebug) {
+        return $fromPathStvDebug.Source
+    }
+
+    throw "STVD executable not found (checked STVD.exe and stvdebug.exe). Install ST Visual Develop, or pass -StvdExePath explicitly. If firmware is already built, rerun with -SkipBuild."
 }
 
 function Invoke-StvdBuild {
@@ -125,6 +136,11 @@ function Assert-Tool {
     }
 }
 
+function Has-Tool {
+    param([string]$Tool)
+    return [bool](Get-Command $Tool -ErrorAction SilentlyContinue)
+}
+
 function Assert-File {
     param([string]$Path)
     if (-not (Test-Path $Path)) {
@@ -153,7 +169,7 @@ $resolvedVersion = $Version
 if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
     Assert-File $mainHeaderPath
     $resolvedVersion = Get-VersionFromMainHeader -HeaderPath $mainHeaderPath
-    Write-Info "Auto-derived release version from $MainHeaderFile: $resolvedVersion"
+    Write-Info "Auto-derived release version from ${MainHeaderFile}: $resolvedVersion"
 }
 
 $normalizedVersion = if ($resolvedVersion.StartsWith("v")) { $resolvedVersion } else { "v$resolvedVersion" }
@@ -163,8 +179,25 @@ $caS19 = Join-Path $ProjectRoot "Release_CA\z80_tester_ca.s19"
 
 Write-Step "Checking required tools and repository state"
 Assert-Tool "git"
-Assert-Tool "gh"
+
+$hasGh = Has-Tool "gh"
+if (-not $hasGh -and -not $SkipPublish) {
+    Write-Warning "GitHub CLI (gh) was not found in PATH. Switching to -SkipPublish mode."
+    Write-Warning "Install gh from https://cli.github.com/ to enable automated release publishing."
+    Write-Host "Install hint: winget install --id GitHub.cli -e" -ForegroundColor Yellow
+    $SkipPublish = $true
+}
+
+if (-not $SkipBuild) {
+    $null = Resolve-StvdPath -UserPath $StvdExePath
+}
+
 Assert-File $projectPath
+
+if ($Preflight) {
+    Write-Host "Preflight checks passed." -ForegroundColor Green
+    exit 0
+}
 
 Push-Location $ProjectRoot
 try {
@@ -215,23 +248,30 @@ try {
         throw "Failed to push tag '$normalizedVersion'"
     }
 
-    Write-Step "Publishing GitHub release with both .s19 assets"
-    $ghArgs = @("release", "create", $normalizedVersion, $ccS19, $caS19, "--title", $normalizedVersion)
+    if (-not $SkipPublish) {
+        Write-Step "Publishing GitHub release with both .s19 assets"
+        $ghArgs = @("release", "create", $normalizedVersion, $ccS19, $caS19, "--title", $normalizedVersion)
 
-    if ($Draft) {
-        $ghArgs += "--draft"
-    }
+        if ($Draft) {
+            $ghArgs += "--draft"
+        }
 
-    if ($ReleaseNotesFile) {
-        Assert-File $ReleaseNotesFile
-        $ghArgs += @("--notes-file", $ReleaseNotesFile)
+        if ($ReleaseNotesFile) {
+            Assert-File $ReleaseNotesFile
+            $ghArgs += @("--notes-file", $ReleaseNotesFile)
+        } else {
+            $ghArgs += @("--generate-notes")
+        }
+
+        & gh @ghArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release creation failed."
+        }
     } else {
-        $ghArgs += @("--generate-notes")
-    }
-
-    & gh @ghArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "GitHub release creation failed."
+        Write-Warning "Skipping GitHub release publish."
+        Write-Host "You can publish manually in GitHub Web UI and attach:" -ForegroundColor Yellow
+        Write-Host " - $ccS19" -ForegroundColor Yellow
+        Write-Host " - $caS19" -ForegroundColor Yellow
     }
 
     Write-Host "Release published successfully: $normalizedVersion" -ForegroundColor Green
