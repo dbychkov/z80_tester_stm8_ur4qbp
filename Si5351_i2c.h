@@ -46,33 +46,33 @@ static bool I2C_WaitEvent(I2C_Event_TypeDef event)
 
 void SI5351_I2C_Init(void)
 {
-	GPIO_DeInit(GPIOB);
-	GPIO_Init(SI5351_I2C_PORT, SI5351_SCL_PIN, GPIO_MODE_OUT_OD_HIZ_FAST);
-	GPIO_Init(SI5351_I2C_PORT, SI5351_SDA_PIN, GPIO_MODE_OUT_OD_HIZ_FAST);
-	I2C_Init(100000, //Частота I2C
-				  SI5351_I2C_ADDR, 
-				  I2C_DUTYCYCLE_2, 
-				  I2C_ACK_CURR, 
-				  I2C_ADDMODE_7BIT, 
-				  (CLK_GetClockFreq() / 1000000));//Частота тактирования шины
-	I2C_Cmd(ENABLE);
+    GPIO_DeInit(GPIOB);
+    GPIO_Init(SI5351_I2C_PORT, SI5351_SCL_PIN, GPIO_MODE_OUT_OD_HIZ_FAST);
+    GPIO_Init(SI5351_I2C_PORT, SI5351_SDA_PIN, GPIO_MODE_OUT_OD_HIZ_FAST);
+    I2C_Init(100000, //Частота I2C
+             SI5351_I2C_ADDR, 
+             I2C_DUTYCYCLE_2, 
+             I2C_ACK_CURR, 
+             I2C_ADDMODE_7BIT, 
+             (CLK_GetClockFreq() / 1000000));//Частота тактирования шины
+    I2C_Cmd(ENABLE);
 }
 
 static void SI5351_SendRegister(unsigned char reg, unsigned char data)
 {
-   I2C_GenerateSTART(ENABLE);
-   while(!I2C_CheckEvent(I2C_EVENT_MASTER_MODE_SELECT));
-   
-   I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);  
-   while(!I2C_CheckEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED));
-	 
-   I2C_SendData(reg);
-   while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	 
-	 I2C_SendData(data);
-   while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	 
-	 I2C_GenerateSTOP(ENABLE); 
+    I2C_GenerateSTART(ENABLE);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_MODE_SELECT));
+    
+    I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);  
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED));
+    
+    I2C_SendData(reg);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData(data);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_GenerateSTOP(ENABLE); 
 }
 
 // Set up specified PLL with mult, num and denom
@@ -82,48 +82,48 @@ static void SI5351_SendRegister(unsigned char reg, unsigned char data)
 //
 static void SI5351_SetupPLL(unsigned char pll, unsigned char mult, unsigned  long num, unsigned long denom)
 {
-	const float d = (float) num / (float) denom;
-	const unsigned long Pz = (unsigned long) (128 * (d));
+    const float d = (float) num / (float) denom;
+    const unsigned long Pz = (unsigned long) (128 * (d));
 
-	const unsigned long P1 = (unsigned long) (128 * (unsigned long) mult + Pz - 512);
-	const unsigned long P2 = (unsigned long) (128 * num - denom * Pz);
-	const unsigned long P3 = denom;
-	
-	// Write Operation - Burst (Auto Address Increment)
-	I2C_GenerateSTART(ENABLE);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_MODE_SELECT));
-   
-  I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);  
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED));
-	
-  I2C_SendData(pll);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	
-	 
-  I2C_SendData((P3 & 0x0000FF00) >> 8);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	 
-	 
-  I2C_SendData((P3 & 0x000000FF));
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	
-	 
-  I2C_SendData((P1 & 0x00030000) >> 16);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	 
-	 
-  I2C_SendData((P1 & 0x0000FF00) >> 8);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	
+    const unsigned long P1 = (unsigned long) (128 * (unsigned long) mult + Pz - 512);
+    const unsigned long P2 = (unsigned long) (128 * num - denom * Pz);
+    const unsigned long P3 = denom;
+    
+    // Write Operation - Burst (Auto Address Increment)
+    I2C_GenerateSTART(ENABLE);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_MODE_SELECT));
+    
+    I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);  
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED));
+    
+    I2C_SendData(pll);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P3 & 0x0000FF00) >> 8);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P3 & 0x000000FF));
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P1 & 0x00030000) >> 16);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P1 & 0x0000FF00) >> 8);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
 
-  I2C_SendData((P1 & 0x000000FF));
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	
-	 
-  I2C_SendData(((P3 & 0x000F0000) >> 12) | ((P2 & 0x000F0000) >> 16));
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	 
-	 
-  I2C_SendData((P2 & 0x0000FF00) >> 8);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	
+    I2C_SendData((P1 & 0x000000FF));
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData(((P3 & 0x000F0000) >> 12) | ((P2 & 0x000F0000) >> 16));
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P2 & 0x0000FF00) >> 8);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
 
-  I2C_SendData((P2 & 0x000000FF));
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));	
+    I2C_SendData((P2 & 0x000000FF));
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
 
-	I2C_GenerateSTOP(ENABLE); 
+    I2C_GenerateSTOP(ENABLE); 
 }
 
 // Set up MultiSynth with integer divider and R divider
@@ -131,45 +131,45 @@ static void SI5351_SetupPLL(unsigned char pll, unsigned char mult, unsigned  lon
 //
 static void SI5351_SetupMultisynth(unsigned char synth, unsigned long divider, unsigned char rDiv)
 {
-	const unsigned long P1 = 128 * divider - 512;	// 18-bit number is an encoded representation of the integer part of the Multi-SynthX divider
-	const unsigned long P2 = 0;						// P2 = 0, P3 = 1 forces an integer value for the divider
-	const unsigned long P3 = 1;
+    const unsigned long P1 = 128 * divider - 512;  // 18-bit number is an encoded representation of the integer part of the Multi-SynthX divider
+    const unsigned long P2 = 0;                    // P2 = 0, P3 = 1 forces an integer value for the divider
+    const unsigned long P3 = 1;
 
-	// Write Operation - Burst (Auto Address Increment)
-	I2C_GenerateSTART(ENABLE);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_MODE_SELECT));
-   
-  I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);  
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED));
-	
-	I2C_SendData(synth);
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_SendData((P3 & 0x0000FF00) >> 8);// MSx_P3[15:8]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_SendData((P3 & 0x000000FF));// MSx_P3[7:0]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_SendData(((P1 & 0x00030000) >> 16) | rDiv | (divider == 4 ? 0x0c : 0x00));// Rx_DIV[2:0], MSx_DIVBY4[1:0], MSx_P1[17:16]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    // Write Operation - Burst (Auto Address Increment)
+    I2C_GenerateSTART(ENABLE);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_MODE_SELECT));
+    
+    I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);  
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED));
+    
+    I2C_SendData(synth);
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P3 & 0x0000FF00) >> 8);// MSx_P3[15:8]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P3 & 0x000000FF));// MSx_P3[7:0]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData(((P1 & 0x00030000) >> 16) | rDiv | (divider == 4 ? 0x0c : 0x00));// Rx_DIV[2:0], MSx_DIVBY4[1:0], MSx_P1[17:16]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
 
-	I2C_SendData((P1 & 0x0000FF00) >> 8);// MSx_P1[15:8]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_SendData((P1 & 0x000000FF));// MSx_P1[7:0]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-				
-	I2C_SendData(((P3 & 0x000F0000) >> 12) | ((P2 & 0x000F0000) >> 16));// MSx_P3[19:16], MSx_P2[19:16]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_SendData((P2 & 0x0000FF00) >> 8);// MSx_P2[15:8]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_SendData((P2 & 0x000000FF));// MSx_P2[7:0]
-  while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
-	
-	I2C_GenerateSTOP(ENABLE);
+    I2C_SendData((P1 & 0x0000FF00) >> 8);// MSx_P1[15:8]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P1 & 0x000000FF));// MSx_P1[7:0]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData(((P3 & 0x000F0000) >> 12) | ((P2 & 0x000F0000) >> 16));// MSx_P3[19:16], MSx_P2[19:16]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P2 & 0x0000FF00) >> 8);// MSx_P2[15:8]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_SendData((P2 & 0x000000FF));// MSx_P2[7:0]
+    while(!I2C_CheckEvent(I2C_EVENT_MASTER_BYTE_TRANSMITTED));
+    
+    I2C_GenerateSTOP(ENABLE);
 }
 
 struct FREQ {
@@ -182,14 +182,14 @@ struct FREQ {
 
 static const unsigned char pllbase [2] =
 {
-	SI5351a_SYNTH_PLL_A,
-	SI5351a_SYNTH_PLL_B,
+    SI5351a_SYNTH_PLL_A,
+    SI5351a_SYNTH_PLL_B,
 };
 
 static const unsigned char multisynchbase [2] =
 {
-	SI5351a_SYNTH_MS_0,
-	SI5351a_SYNTH_MS_1,
+    SI5351a_SYNTH_MS_0,
+    SI5351a_SYNTH_MS_1,
 };
 
 static unsigned char SI5351_SetFrequencyX(unsigned char clkout, unsigned long frequency)
@@ -241,36 +241,36 @@ static unsigned char SI5351_SetFrequencyX(unsigned char clkout, unsigned long fr
 //
 static void SI5351_SetFrequencyA(unsigned long frequency)
 {
-	static unsigned char skipreset;
-	static unsigned char oldmult;
-	const unsigned char mult = SI5351_SetFrequencyX(0, frequency);
+    static unsigned char skipreset;
+    static unsigned char oldmult;
+    const unsigned char mult = SI5351_SetFrequencyX(0, frequency);
 
-	if (skipreset == 0 || mult != oldmult)
-	{
-		SI5351_SendRegister(SI5351a_PLL_RESET, 0x20);	// PLL A reset
-		// Finally switch on the CLK1 output (0x4F)
-		// and set the MultiSynth0 input to be PLL B
-		SI5351_SendRegister(SI5351a_CLK0_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_A);
+    if (skipreset == 0 || mult != oldmult)
+    {
+        SI5351_SendRegister(SI5351a_PLL_RESET, 0x20);  // PLL A reset
+        // Finally switch on the CLK1 output (0x4F)
+        // and set the MultiSynth0 input to be PLL B
+        SI5351_SendRegister(SI5351a_CLK0_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_A);
 
-		skipreset = 1;
-		oldmult = mult;
-	}
+        skipreset = 1;
+        oldmult = mult;
+    }
 }
 
 
 static void SI5351_Init(void)
 {
-	SI5351_I2C_Init();   
-	SI5351_SendRegister(SI5351a_PLL_LOADCAP, 0xC0 | 0x12);
-	SI5351_SendRegister(SI5351a_PLL_RESET, 0x20);	// PLL A reset
-	// Finally switch on the CLK0 output (0x4F)
-	// and set the MultiSynth0 input to be PLL A
-	SI5351_SendRegister(SI5351a_CLK0_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_A);
+    SI5351_I2C_Init();   
+    SI5351_SendRegister(SI5351a_PLL_LOADCAP, 0xC0 | 0x12);
+    SI5351_SendRegister(SI5351a_PLL_RESET, 0x20);  // PLL A reset
+    // Finally switch on the CLK0 output (0x4F)
+    // and set the MultiSynth0 input to be PLL A
+    SI5351_SendRegister(SI5351a_CLK0_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_A);
 
-	SI5351_SendRegister(SI5351a_PLL_RESET, 0x80);	// PLL B reset
-	// Finally switch on the CLK1 output (0x4F)
-	// and set the MultiSynth0 input to be PLL B
-	SI5351_SendRegister(SI5351a_CLK1_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_B);
+    SI5351_SendRegister(SI5351a_PLL_RESET, 0x80);  // PLL B reset
+    // Finally switch on the CLK1 output (0x4F)
+    // and set the MultiSynth0 input to be PLL B
+    SI5351_SendRegister(SI5351a_CLK1_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_B);
 }
 
 
