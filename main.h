@@ -6,7 +6,7 @@
  * Increment FIRMWARE_VERSION_MINOR for small, backward-compatible changes;
  * reset to 0 whenever the major version is incremented. */
 #define FIRMWARE_VERSION_MAJOR 1
-#define FIRMWARE_VERSION_MINOR 0
+#define FIRMWARE_VERSION_MINOR 1
 
 @far @interrupt void tim1UpdateInterrupt(void);
 

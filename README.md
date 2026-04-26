@@ -1,6 +1,6 @@
 # Z80_Tester_STM8_UR4QBP
 
-STM8 firmware for Z80 CPU Tester developed by UR4QBP.
+STM8S103F3P firmware for Z80 CPU Tester developed by UR4QBP.
 
 ## Change Log
 
@@ -21,7 +21,7 @@ STM8 firmware for Z80 CPU Tester developed by UR4QBP.
 
 ### Project Overview
 
-This is the STM8S microcontroller firmware for the Z80 Tester project. It generates selectable clock frequencies (1-40 MHz) using a SI5351A PLL clock generator, displays the current frequency on a 2-digit 7-segment display, and controls the Z80 processor reset line.
+This is the STM8S103F3P microcontroller firmware for the Z80 Tester project. It generates selectable clock frequencies (1-40 MHz) using a SI5351A PLL clock generator, displays the current frequency on a 2-digit 7-segment display, and controls the Z80 processor reset line.
 
 ---
 
