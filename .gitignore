@@ -19,6 +19,11 @@ Release_CA/
 *.s19
 *.sm8
 *.pdb
+*.o
+*.map
+
+# Build/release script logs
+*.log
 
 # Windows
 desktop.ini
