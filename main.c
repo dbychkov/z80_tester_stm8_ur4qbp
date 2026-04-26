@@ -218,6 +218,8 @@ void main(void) {
             Check_Freq();
             FLASH_Write(0x4000, freq);
             SI5351_SetFrequencyA(freq * 1000000);
+		    // Wait for PLL to lock before releasing Z80 reset.
+    		SI5351_WaitPLLLock();
             delay_ms(500);
 			// Release the Z80 now that the new frequency is stable.
             GPIO_WriteLow(RST_Z80_PORT, RST_Z80);
@@ -231,6 +233,8 @@ void main(void) {
             Check_Freq();
             FLASH_Write(0x4000, freq);
             SI5351_SetFrequencyA(freq * 1000000);
+		    // Wait for PLL to lock before releasing Z80 reset.
+    		SI5351_WaitPLLLock();
             delay_ms(500);
 			// Release the Z80 now that the new frequency is stable.
             GPIO_WriteLow(RST_Z80_PORT, RST_Z80);
