@@ -20,44 +20,52 @@
 #include "stm8s.h"
 #include "si5351_i2c.h"
 
-#define DIG_1 GPIO_PIN_2 // GPIOC анод/катод 1-го знака
+/* ====================================================================
+ * HARDWARE PIN MAPPING & CONTROL MACROS
+ * ====================================================================
+ * This section defines GPIO pins and macros for controlling a 2-digit
+ * 7-segment display (common cathode) and Z80 reset control.
+ * Note: For common cathode displays, active-LOW pins turn segments ON.
+ */
+
+#define DIG_1 GPIO_PIN_2 // GPIOC anode/cathode of digit 1
 #define DIG_1_PORT GPIOD
 #define DIG_1_ON GPIO_WriteHigh(DIG_1_PORT, DIG_1)
 #define DIG_1_OFF GPIO_WriteLow(DIG_1_PORT, DIG_1)
-#define DIG_2 GPIO_PIN_1 // GPIOC анод/катод 2-го знака
+#define DIG_2 GPIO_PIN_1 // GPIOC anode/cathode of digit 2
 #define DIG_2_PORT GPIOD
 #define DIG_2_ON GPIO_WriteHigh(DIG_2_PORT, DIG_2)
 #define DIG_2_OFF GPIO_WriteLow(DIG_2_PORT, DIG_2)
 
-#define SEG_A GPIO_PIN_7 // GPIOC сегмент "А"
+#define SEG_A GPIO_PIN_7 // GPIOC segment "A"
 #define SEG_A_PORT GPIOC
 #define SEG_A_ON GPIO_WriteLow(SEG_A_PORT, SEG_A)
 #define SEG_A_OFF GPIO_WriteHigh(SEG_A_PORT, SEG_A)
-#define SEG_B GPIO_PIN_3 // GPIOD сегмент "B"
+#define SEG_B GPIO_PIN_3 // GPIOD segment "B"
 #define SEG_B_PORT GPIOD
 #define SEG_B_ON GPIO_WriteLow(SEG_B_PORT, SEG_B)
 #define SEG_B_OFF GPIO_WriteHigh(SEG_B_PORT, SEG_B)
-#define SEG_C GPIO_PIN_6 // GPIOC сегмент "C"
+#define SEG_C GPIO_PIN_6 // GPIOC segment "C"
 #define SEG_C_PORT GPIOC
 #define SEG_C_ON GPIO_WriteLow(SEG_C_PORT, SEG_C)
 #define SEG_C_OFF GPIO_WriteHigh(SEG_C_PORT, SEG_C)
-#define SEG_D GPIO_PIN_4 // GPIOD сегмент "D"
+#define SEG_D GPIO_PIN_4 // GPIOD segment "D"
 #define SEG_D_PORT GPIOD
 #define SEG_D_ON GPIO_WriteLow(SEG_D_PORT, SEG_D)
 #define SEG_D_OFF GPIO_WriteHigh(SEG_D_PORT, SEG_D)
-#define SEG_E GPIO_PIN_5 // GPIOD сегмент "E"
+#define SEG_E GPIO_PIN_5 // GPIOD segment "E"
 #define SEG_E_PORT GPIOD
 #define SEG_E_ON GPIO_WriteLow(SEG_E_PORT, SEG_E)
 #define SEG_E_OFF GPIO_WriteHigh(SEG_E_PORT, SEG_E)
-#define SEG_F GPIO_PIN_6 // GPIOD сегмент "F"
+#define SEG_F GPIO_PIN_6 // GPIOD segment "F"
 #define SEG_F_PORT GPIOD
 #define SEG_F_ON GPIO_WriteLow(SEG_F_PORT, SEG_F)
 #define SEG_F_OFF GPIO_WriteHigh(SEG_F_PORT, SEG_F)
-#define SEG_G GPIO_PIN_5 // GPIOD сегмент "G"
+#define SEG_G GPIO_PIN_5 // GPIOD segment "G"
 #define SEG_G_PORT GPIOC
 #define SEG_G_ON GPIO_WriteLow(SEG_G_PORT, SEG_G)
 #define SEG_G_OFF GPIO_WriteHigh(SEG_G_PORT, SEG_G)
-#define SEG_DP GPIO_PIN_4 // GPIOD сегмент "DP"
+#define SEG_DP GPIO_PIN_4 // GPIOD segment "DP"
 #define SEG_DP_PORT GPIOC
 
 #define RST_Z80 GPIO_PIN_3 // Reset Z80
@@ -72,8 +80,8 @@
 #define OK 1
 
 #if OA
-const unsigned char number[] = //В этом массиве задаются цифры на семисегментном
-                               //индикаторе c общим анодом
+const unsigned char number[] = // This array defines digits for a
+                               // seven-segment common-anode display
     {
         0b01000000, // 0
         0b01111001, // 1
@@ -91,8 +99,8 @@ const unsigned char number[] = //В этом массиве задаются цифры на семисегментном
 #endif
 
 #if OK
-const unsigned char number[] = //В этом массиве задаются цифры на семисегментном
-                               //индикаторе c общим катодом
+const unsigned char number[] = // This array defines digits for a
+                               // seven-segment common-cathode display
     {
         0b10111111, // 0
         0b10000110, // 1
@@ -109,6 +117,19 @@ const unsigned char number[] = //В этом массиве задаются цифры на семисегментном
 #define SEG_DP_ON GPIO_WriteHigh(SEG_DP_PORT, SEG_DP)
 #endif
 
+/* ====================================================================
+ * GLOBAL VARIABLES & STATE
+ * ====================================================================
+ * freq:      Current frequency (MHz). Range: freq_min to freq_max.
+ * freq_max:  Upper frequency limit (40 MHz default).
+ * freq_min:  Lower frequency limit (1 MHz default).
+ * t:         Dynamic display counter (cycles 0 to 2*t_delay).
+ *            Implements multiplexing for 2-digit display refresh.
+ * t_delay:   Multiplexing timing divisor (affects display refresh rate).
+ * dp_flag:   Decimal point enable flag (set during Z80 reset hold).
+ * status:    Last read status from SI5351A PLL status register.
+ */
+
 // Function prototypes
 void SendSeg(const unsigned char byte); //Запись сегментов в индикатор
 void FLASH_Write(unsigned int WriteAddr, unsigned char val);
@@ -123,21 +144,21 @@ unsigned char t, t_delay = 1;
 bool dp_flag = 0;
 unsigned char status;
 
+// Power-on I2C BUSY lockup fix.
+// At cold power-on the STM8 and SI5351A start simultaneously. Bus glitches
+// during SI5351A power-on cause the STM8 I2C BUSY flag to get stuck — only
+// a hardware reset can clear it, not software re-init.
+//
+// Boot 1 — cold power-on (WWDGF=0):
+//   !(RST->SR & 0x01) is TRUE. I2C peripheral is uninitialized so
+//   SI5351_ReadRegister times out and returns 0. 0 != 0x4F ? WWDG fires.
+//   SI5351A stays powered through the reset.
+//
+// Boot 2 — after WWDG reset (WWDGF=1):
+//   !(RST->SR & 0x01) is FALSE ? && short-circuits, no I2C call made.
+//   Normal boot proceeds; SI5351A already initialized ? I2C works.
+//   RST->SR cleared so next cold power-on triggers Boot 1 again.
 void PowerOn_I2C_Check(void) {
-    // Power-on I2C BUSY lockup fix.
-    // At cold power-on the STM8 and SI5351A start simultaneously. Bus glitches
-    // during SI5351A power-on cause the STM8 I2C BUSY flag to get stuck — only
-    // a hardware reset can clear it, not software re-init.
-    //
-    // Boot 1 — cold power-on (WWDGF=0):
-    //   !(RST->SR & 0x01) is TRUE. I2C peripheral is uninitialized so
-    //   SI5351_ReadRegister times out and returns 0. 0 != 0x4F ? WWDG fires.
-    //   SI5351A stays powered through the reset.
-    //
-    // Boot 2 — after WWDG reset (WWDGF=1):
-    //   !(RST->SR & 0x01) is FALSE ? && short-circuits, no I2C call made.
-    //   Normal boot proceeds; SI5351A already initialized ? I2C works.
-    //   RST->SR cleared so next cold power-on triggers Boot 1 again.
     if (!(RST->SR & 0x01) &&
         (SI5351_ReadRegister(16) != (0x4F | SI5351a_CLK_SRC_PLL_A))) {
         WWDG->CR = 0x80; // WDGA=1, T6=0: immediate reset
@@ -147,10 +168,10 @@ void PowerOn_I2C_Check(void) {
     RST->SR = 0x00; // clear WWDGF so next power-on triggers the reset again
 }
 
+// Wait for PLL to lock before releasing Z80 reset.
+// CLK0 output is unstable until LOL_A (bit 5) and SYS_INIT (bit 7) clear.
+// Retries PLL reset once on timeout; gives up after 3 retries to avoid hang.
 void SI5351_WaitPLLLock(void) {
-    // Wait for PLL to lock before releasing Z80 reset.
-    // CLK0 output is unstable until LOL_A (bit 5) and SYS_INIT (bit 7) clear.
-    // Retries PLL reset once on timeout; gives up after 3 retries to avoid hang.
     unsigned char lock_wait = 0;
     unsigned char retries = 0;
     do {
@@ -167,8 +188,11 @@ void SI5351_WaitPLLLock(void) {
 
 // Main function
 void main(void) {
+    // Recover from the power-on I2C BUSY lockup case before touching the SI5351A.
     PowerOn_I2C_Check();
 
+    // Initialize MCU peripherals, keep the Z80 halted, and show the decimal
+    // point while the saved clock setting is restored and the PLL stabilizes.
     CPU_Set();
     GPIO_WriteHigh(RST_Z80_PORT, RST_Z80);
     dp_flag = 1;
@@ -178,13 +202,16 @@ void main(void) {
     SI5351_SetFrequencyA(freq * 1000000);
     delay_ms(400);
 
+    // Wait for PLL to lock before releasing Z80 reset.
     SI5351_WaitPLLLock();
     GPIO_WriteLow(RST_Z80_PORT, RST_Z80);
     dp_flag = 0;
 
-    //*********************************************************
+    // Poll the two buttons and fully reapply the output clock after each
+    // change so the Z80 only runs from a locked, persisted frequency.
     while (1) {
         if (!GPIO_ReadInputPin(BTN_PORT, BTN_UP_PIN)) {
+            // Hold the Z80 in reset while stepping the frequency upward.
             GPIO_WriteHigh(RST_Z80_PORT, RST_Z80);
             dp_flag = 1;
             freq++;
@@ -192,10 +219,12 @@ void main(void) {
             FLASH_Write(0x4000, freq);
             SI5351_SetFrequencyA(freq * 1000000);
             delay_ms(500);
+			// Release the Z80 now that the new frequency is stable.
             GPIO_WriteLow(RST_Z80_PORT, RST_Z80);
             dp_flag = 0;
         }
         if (!GPIO_ReadInputPin(BTN_PORT, BTN_DN_PIN)) {
+            // Apply the same safe update sequence when stepping downward.
             GPIO_WriteHigh(RST_Z80_PORT, RST_Z80);
             dp_flag = 1;
             freq--;
@@ -203,6 +232,7 @@ void main(void) {
             FLASH_Write(0x4000, freq);
             SI5351_SetFrequencyA(freq * 1000000);
             delay_ms(500);
+			// Release the Z80 now that the new frequency is stable.
             GPIO_WriteLow(RST_Z80_PORT, RST_Z80);
             dp_flag = 0;
         }
@@ -218,6 +248,8 @@ void Check_Freq(void) {
     }
 }
 
+// Initialize all MCU's GPIOs and peripherals, set the CPU clock to 16 MHz,
+// and start Timer 1 for display multiplexing.
 void CPU_Set(void) {
     CLK_HSIPrescalerConfig(CLK_PRESCALER_HSIDIV1 | CLK_PRESCALER_CPUDIV1);
     FLASH_DeInit();
@@ -241,6 +273,8 @@ void CPU_Set(void) {
     enableInterrupts();
 }
 
+
+// Timer 1 update interrupt handler for dynamic display multiplexing.
 @far @interrupt void tim1UpdateInterrupt(void) {
     TIM1_ClearITPendingBit(TIM1_IT_UPDATE);
 
@@ -300,10 +334,11 @@ void CPU_Set(void) {
     t++;
     if (t > t_delay * 2) {
         t = 0;
-    } //Программный счетчик динамической индикации
+    } // Counter for dynamic display multiplexing
 }
 
-void SendSeg(const unsigned char byte) //Запись сегментов в индикатор
+// Set segments of the 7-segment LED display
+void SendSeg(const unsigned char byte)
 {
     if (byte & 0b00000001) {
         SEG_A_OFF;
@@ -342,6 +377,7 @@ void SendSeg(const unsigned char byte) //Запись сегментов в индикатор
     }
 }
 
+// Write Z80 frequency setting to MCU's EEPROM for persistence across resets and power cycles.
 void FLASH_Write(unsigned int WriteAddr, unsigned char val) {
     FLASH_Unlock(FLASH_MEMTYPE_DATA);
     FLASH_EraseByte(WriteAddr);

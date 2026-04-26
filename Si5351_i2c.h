@@ -49,12 +49,12 @@ void SI5351_I2C_Init(void)
     GPIO_DeInit(GPIOB);
     GPIO_Init(SI5351_I2C_PORT, SI5351_SCL_PIN, GPIO_MODE_OUT_OD_HIZ_FAST);
     GPIO_Init(SI5351_I2C_PORT, SI5351_SDA_PIN, GPIO_MODE_OUT_OD_HIZ_FAST);
-    I2C_Init(100000, //Частота I2C
+    I2C_Init(100000, // I2C frequency
              SI5351_I2C_ADDR, 
              I2C_DUTYCYCLE_2, 
              I2C_ACK_CURR, 
              I2C_ADDMODE_7BIT, 
-             (CLK_GetClockFreq() / 1000000));//Частота тактирования шины
+             (CLK_GetClockFreq() / 1000000));// Bus clock frequency
     I2C_Cmd(ENABLE);
 }
 
@@ -173,9 +173,9 @@ static void SI5351_SetupMultisynth(unsigned char synth, unsigned long divider, u
 }
 
 struct FREQ {
-  unsigned char plldiv;	// должно быть чётное число
+    unsigned char plldiv;	// must be an even number
   unsigned char outdiv;	// Rx Output Divider code (SI5351a_R_DIV_1..SI5351a_R_DIV_128)
-  unsigned int divider;	// общий делитель
+    unsigned int divider;	// overall divider
   unsigned long fmin;
   unsigned long fmax;
 };
