@@ -32,24 +32,56 @@ This is the STM8S microcontroller firmware for the Z80 Tester project. It genera
 ##### Hardware Pin Mapping & Macros
 
 - **7-Segment Display Control**:
-- 2 digits (DIG_1, DIG_2) with common cathode architecture
+- 2 digits (DIG_1, DIG_2), polarity selected at build time
 - 7 segments (SEG_A through SEG_G) plus decimal point (SEG_DP)
-- **Important**: For common cathode displays:
-- Writing GPIO LOW (0V) **TURNS ON** a segment (active-low logic)
-- Writing GPIO HIGH (+3.3V) **TURNS OFF** a segment
-- This is why macros use inverted logic (SEG_X_ON sets pin LOW, SEG_X_OFF sets pin HIGH)
+- **Important**:
+- Segment/digit polarity is selected by `DISPLAY_COMMON_ANODE`
+- `DISPLAY_COMMON_ANODE=0` -> common cathode firmware
+- `DISPLAY_COMMON_ANODE=1` -> common anode firmware
 
 - **Z80 Reset Control**: RST_Z80 on GPIO_PIN_3 (active-low reset)
 - **Button Inputs**: BTN_UP_PIN and BTN_DN_PIN on GPIOA (pull-up inputs)
 
 ##### 7-Segment Display Lookup Tables
 
-Two tables depending on hardware configuration:
+Two lookup tables are built into the firmware:
 
-- **OA Mode** (2281B common anode): Bit patterns for common anode display
-- **OK Mode** (2281A common cathode): Bit patterns for common cathode display
+- Common cathode digit map
+- Common anode digit map
 
-Current code uses **OK mode** (common cathode).
+The active table is selected at compile time using `DISPLAY_COMMON_ANODE`.
+
+##### Building Two Firmware Variants (Common Cathode + Common Anode)
+
+The project now supports a compile-time macro:
+
+- `DISPLAY_COMMON_ANODE=0` -> common cathode firmware
+- `DISPLAY_COMMON_ANODE=1` -> common anode firmware
+
+If the macro is not defined, firmware defaults to common cathode.
+
+Current ST Visual Develop (STM8 Cosmic) project configurations:
+
+1. `Debug_CC` -> common cathode, debug profile
+2. `Debug_CA` -> common anode, debug profile
+3. `Release_CC` -> common cathode, release profile
+4. `Release_CA` -> common anode, release profile
+
+Define mapping used by these configurations:
+
+- `*_CC` configurations compile with `DISPLAY_COMMON_ANODE=0`
+- `*_CA` configurations compile with `DISPLAY_COMMON_ANODE=1`
+
+Output examples:
+
+- `Release_CC/z80_tester_cc.s19`
+- `Release_CA/z80_tester_ca.s19`
+- `Debug_CC/z80_tester_cc_dbg.s19`
+- `Debug_CA/z80_tester_ca_dbg.s19`
+
+Note: The `.s19` files are the firmware images that should be programmed into the STM8 MCU using ST Visual Programmer (STVP).
+
+This avoids editing source code when switching display type.
 
 ##### Global Variables
 
@@ -173,11 +205,11 @@ Byte bit:  0    1    2    3    4    5    6
 Segment:   A    B    C    D    E    F    G
 ```
 
-**Common cathode logic**:
+**Display logic**:
 
-- If bit = 1, the code drives SEG_OFF and the segment turns OFF
-- If bit = 0, the code drives SEG_ON and the segment turns ON
-- The logic is inverted because the display hardware is common cathode
+- The bit-to-segment mapping is fixed (A..G bits 0..6)
+- ON/OFF polarity is handled by compile-time macros selected via `DISPLAY_COMMON_ANODE`
+- This keeps `SendSeg()` unchanged while supporting both display types
 
 ##### FLASH_Write()
 

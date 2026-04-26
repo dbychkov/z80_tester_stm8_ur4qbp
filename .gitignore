@@ -1,6 +1,10 @@
 # Build output directories
 Debug/
 Release/
+Debug_CC/
+Debug_CA/
+Release_CC/
+Release_CA/
 
 # STVD IDE state/session files (auto-generated, machine-specific)
 *.wdb
@@ -14,6 +18,7 @@ Release/
 *.lkf
 *.s19
 *.sm8
+*.pdb
 
 # Windows
 desktop.ini

@@ -26,12 +26,21 @@
 #include "stm8s.h"
 #include "si5351_i2c.h"
 
+#ifndef DISPLAY_COMMON_ANODE
+#define DISPLAY_COMMON_ANODE 0
+#endif
+
+#if (DISPLAY_COMMON_ANODE != 0) && (DISPLAY_COMMON_ANODE != 1)
+#error DISPLAY_COMMON_ANODE must be 0 (common cathode) or 1 (common anode)
+#endif
+
 /* ====================================================================
  * HARDWARE PIN MAPPING & CONTROL MACROS
  * ====================================================================
  * This section defines GPIO pins and macros for controlling a 2-digit
- * 7-segment display (common cathode) and Z80 reset control.
- * Note: For common cathode displays, active-LOW pins turn segments ON.
+ * 7-segment display and Z80 reset control.
+ * Note: Display polarity is selected at compile time with
+ * DISPLAY_COMMON_ANODE (0 = common cathode, 1 = common anode).
  */
 
 #define DIG_1 GPIO_PIN_2 // GPIOC anode/cathode of digit 1
@@ -81,11 +90,7 @@
 #define BTN_UP_PIN GPIO_PIN_2
 #define BTN_DN_PIN GPIO_PIN_1
 
-// OA - 2281B, OK - 2281A
-//#define OA 1
-#define OK 1
-
-#if OA
+#if DISPLAY_COMMON_ANODE
 const unsigned char number[] = // This array defines digits for a
                                // seven-segment common-anode display
     {
@@ -102,9 +107,7 @@ const unsigned char number[] = // This array defines digits for a
 };
 #define SEG_DP_ON GPIO_WriteLow(SEG_DP_PORT, SEG_DP)
 #define SEG_DP_OFF GPIO_WriteHigh(SEG_DP_PORT, SEG_DP)
-#endif
-
-#if OK
+#else
 const unsigned char number[] = // This array defines digits for a
                                // seven-segment common-cathode display
     {
@@ -288,7 +291,7 @@ void CPU_Set(void) {
 @far @interrupt void tim1UpdateInterrupt(void) {
     TIM1_ClearITPendingBit(TIM1_IT_UPDATE);
 
-#if OA
+#if DISPLAY_COMMON_ANODE
     if (t == t_delay * 1) {
         SendSeg(0xFF);
         if (freq / 10 % 10) {
@@ -312,9 +315,7 @@ void CPU_Set(void) {
             SEG_DP_OFF;
         }
     }
-#endif
-
-#if OK
+#else
     if (t == t_delay * 1) {
         SendSeg(0x00);
         if (freq / 10 % 10) {
