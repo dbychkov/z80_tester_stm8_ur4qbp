@@ -24,7 +24,9 @@
  */
 
 #include "stm8s.h"
-#include "si5351_i2c.h"
+#include "Si5351_i2c.h"
+#include "main.h"
+
 
 #ifndef DISPLAY_COMMON_ANODE
 #define DISPLAY_COMMON_ANODE 0

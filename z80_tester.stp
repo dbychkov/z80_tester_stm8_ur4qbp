@@ -565,6 +565,11 @@ String.6.0=2025,5,7,23,5,10
 [Root.Source Files.main.c]
 ElemType=File
 PathName=main.c
+Next=Root.Source Files.Si5351_i2c.c
+
+[Root.Source Files.Si5351_i2c.c]
+ElemType=File
+PathName=Si5351_i2c.c
 Next=Root.Source Files.src\stm8s_clk.c
 
 [Root.Source Files.src\stm8s_clk.c]
