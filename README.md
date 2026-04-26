@@ -1,4 +1,4 @@
-# z80_tester_stm8_ur4qbp
+# Z80_Tester_STM8_UR4QBP
 
 STM8 firmware for Z80 CPU Tester developed by UR4QBP.
 
