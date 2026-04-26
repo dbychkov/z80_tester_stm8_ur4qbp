@@ -19,11 +19,11 @@
         v<FIRMWARE_VERSION_MAJOR>.<FIRMWARE_VERSION_MINOR>.0
 
     Typical usage:
-      .\publish-release.ps1
-      .\publish-release.ps1 -Version v1.2.0
-      .\publish-release.ps1 -AllowDirty -Version v1.2.0
-      .\publish-release.ps1 -Preflight -SkipBuild
-      .\publish-release.ps1 -SkipPublish
+      .\build\publish-release.ps1
+      .\build\publish-release.ps1 -Version v1.2.0
+      .\build\publish-release.ps1 -AllowDirty -Version v1.2.0
+      .\build\publish-release.ps1 -Preflight -SkipBuild
+      .\build\publish-release.ps1 -SkipPublish
 
     Optional flags:
       -Draft        Create a draft GitHub release
@@ -334,6 +334,8 @@ Firmware code version: $codeVersion
 Release assets:
 - z80_tester_cc.s19: Common cathode firmware (DISPLAY_COMMON_ANODE=0).
 - z80_tester_ca.s19: Common anode firmware (DISPLAY_COMMON_ANODE=1).
+
+    The `.s19` files are the firmware images that should be programmed into the STM8 MCU using ST Visual Programmer (STVP).
 "@
 
         if ($Draft) {
