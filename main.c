@@ -164,21 +164,21 @@ while (1)
 	{
 		if ( !GPIO_ReadInputPin(BTN_PORT, BTN_UP_PIN) ) 
 		{
-		//GPIO_WriteHigh(RST_Z80_PORT, RST_Z80); dp_flag = 1;
+		GPIO_WriteHigh(RST_Z80_PORT, RST_Z80); dp_flag = 1;
 		freq++; Check_Freq(); 
 		FLASH_Write(0x4000, freq); 
 		SI5351_SetFrequencyA(freq*1000000); 
 		delay_ms(500);
-		//GPIO_WriteLow(RST_Z80_PORT, RST_Z80); dp_flag = 0;
+		GPIO_WriteLow(RST_Z80_PORT, RST_Z80); dp_flag = 0;
 		};
 		if ( !GPIO_ReadInputPin(BTN_PORT, BTN_DN_PIN) ) 
 		{
-		//GPIO_WriteHigh(RST_Z80_PORT, RST_Z80); dp_flag = 1;
+		GPIO_WriteHigh(RST_Z80_PORT, RST_Z80); dp_flag = 1;
 		freq--; Check_Freq(); 
 		FLASH_Write(0x4000, freq); 
 		SI5351_SetFrequencyA(freq*1000000); 
 		delay_ms(500);
-		//GPIO_WriteLow(RST_Z80_PORT, RST_Z80); dp_flag = 0;
+		GPIO_WriteLow(RST_Z80_PORT, RST_Z80); dp_flag = 0;
 		};
 	}
 }
