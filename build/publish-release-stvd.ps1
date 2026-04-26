@@ -1,15 +1,14 @@
 <#
-    Script: publish-release.ps1
+    Script: publish-release-stvd.ps1
     Author: dbychkov
     Created: 2026-04-26
 
     Purpose:
-      Build Release_CC and Release_CA firmware with COSMIC command-line tools
-      (headless), create/push a git tag, and publish a GitHub release with
-      both .s19 assets.
+      Build Release_CC and Release_CA firmware with ST Visual Develop (STVD),
+      create/push a git tag, and publish a GitHub release with both .s19 assets.
 
     Prerequisites:
-      - COSMIC CXSTM8 tools installed (cxstm8.exe, clnk.exe, chex.exe)
+      - STVD installed (default: C:\Program Files (x86)\STMicroelectronics\st_toolset\stvd\stvdebug.exe)
       - git and optionally gh available in PATH
       - Run from inside repository (default ProjectRoot = parent of this script folder)
 
@@ -19,12 +18,12 @@
         v<FIRMWARE_VERSION_MAJOR>.<FIRMWARE_VERSION_MINOR>.0
 
     Typical usage:
-      .\build\publish-release.ps1
-      .\build\publish-release.ps1 -SkipPublish -AllowDirty
-      .\build\publish-release.ps1 -Version v1.2.0
-      .\build\publish-release.ps1 -AllowDirty -Version v1.2.0
-      .\build\publish-release.ps1 -Preflight -SkipBuild
-      .\build\publish-release.ps1 -SkipPublish
+      .\build\publish-release-stvd.ps1
+      .\build\publish-release-stvd.ps1 -SkipPublish -AllowDirty
+      .\build\publish-release-stvd.ps1 -Version v1.2.0
+      .\build\publish-release-stvd.ps1 -AllowDirty -Version v1.2.0
+      .\build\publish-release-stvd.ps1 -Preflight -SkipBuild
+      .\build\publish-release-stvd.ps1 -SkipPublish
 
     Optional flags:
       -Draft        Create a draft GitHub release
@@ -33,17 +32,18 @@
       -Preflight    Validate prerequisites and inputs, then exit
       -AllowDirty   Allow uncommitted changes in working tree
 
-    Optional file parameters:
-      -ProjectRoot      Project root path (defaults to build\..)
-      -ProjectFile      STVD project file (default: z80_tester.stp)
-      -MainHeaderFile   Header file with FIRMWARE_VERSION_* defines (default: main.h)
-      -ReleaseNotesFile Path to custom release notes for gh release create
-      -CosmicBinPath    Explicit folder containing cxstm8.exe/clnk.exe/chex.exe
+        Optional file parameters:
+            -ProjectRoot      Project root path (defaults to build\..)
+            -ProjectFile      STVD project file (default: z80_tester.stp)
+            -MainHeaderFile   Header file with FIRMWARE_VERSION_* defines (default: main.h)
+            -ReleaseNotesFile Path to custom release notes for gh release create
+            -StvdPath         Full path to stvdebug.exe
+            -CosmicBinPath    Explicit folder containing cxstm8.exe/clnk.exe/chex.exe
 
-    Change Log:
-      - 2026-04-26 dbychkov: Initial script header and release automation.
-      - 2026-04-26 dbychkov: Added auto-version from main.h and build folder root handling.
-      - 2026-04-26 dbychkov: Switched build flow to direct COSMIC headless commands.
+        Notes:
+            STVD's GUI project file (.stp) is treated as the source of truth for build
+            configurations and output names. The build itself is executed headlessly from
+            the command lines encoded in the STVD project settings.
 #>
 
 param(
@@ -54,6 +54,7 @@ param(
     [string]$ProjectFile = "z80_tester.stp",
     [string]$MainHeaderFile = "main.h",
     [string]$ReleaseNotesFile,
+    [string]$StvdPath = "C:\Program Files (x86)\STMicroelectronics\st_toolset\stvd\stvdebug.exe",
     [string]$CosmicBinPath,
 
     [switch]$Draft,
@@ -142,39 +143,6 @@ function Invoke-External {
     }
 }
 
-function Resolve-CosmicRuntimeFile {
-    param(
-        [string]$FileName,
-        [string]$ClnkPath
-    )
-
-    $clnkDir = Split-Path -Path $ClnkPath -Parent
-    $cosmicRoot = Split-Path -Path $clnkDir -Parent
-
-    $candidates = @(
-        (Join-Path $clnkDir $FileName),
-        (Join-Path (Join-Path $clnkDir "Hstm8") $FileName),
-        (Join-Path (Join-Path $clnkDir "Lib") $FileName),
-        (Join-Path (Join-Path $cosmicRoot "Hstm8") $FileName),
-        (Join-Path (Join-Path $cosmicRoot "Lib") $FileName)
-    )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            return (Resolve-Path $candidate).Path
-        }
-    }
-
-    throw "Required COSMIC runtime file '$FileName' not found near $ClnkPath"
-}
-
-function Get-VersionFromMainHeader {
-    param([string]$HeaderPath)
-
-    $versions = Get-FirmwareVersionsFromMainHeader -HeaderPath $HeaderPath
-    return $versions.ReleaseVersion
-}
-
 function Get-FirmwareVersionsFromMainHeader {
     param([string]$HeaderPath)
 
@@ -196,155 +164,226 @@ function Get-FirmwareVersionsFromMainHeader {
     }
 }
 
-function Invoke-CosmicBuildVariant {
+function Get-IniSections {
+    param([string]$FilePath)
+
+    $sections = @{}
+    $currentSection = $null
+
+    foreach ($line in Get-Content -Path $FilePath) {
+        if ($line -match '^\[(.+)\]$') {
+            $currentSection = $Matches[1]
+            $sections[$currentSection] = @{}
+            continue
+        }
+
+        if (-not $currentSection) {
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith(';')) {
+            continue
+        }
+
+        $delimiterIndex = $line.IndexOf('=')
+        if ($delimiterIndex -lt 0) {
+            continue
+        }
+
+        $key = $line.Substring(0, $delimiterIndex)
+        $value = $line.Substring($delimiterIndex + 1)
+        $sections[$currentSection][$key] = $value
+    }
+
+    return $sections
+}
+
+function Get-StvdProjectDefinition {
+    param(
+        [string]$ProjectPath
+    )
+
+    $sections = Get-IniSections -FilePath $ProjectPath
+    $configDefinitions = @{}
+
+    foreach ($configSectionName in $sections.Keys | Where-Object { $_ -match '^Config\.\d+$' }) {
+        $section = $sections[$configSectionName]
+        $configName = $section['ConfigName']
+        if ([string]::IsNullOrWhiteSpace($configName)) {
+            continue
+        }
+
+        $configIndex = [int]($configSectionName.Split('.')[1])
+        $compileSection = $sections["Root.Config.$configIndex.Settings.3"]
+        $linkSection = $sections["Root.Config.$configIndex.Settings.6"]
+        $postBuildSection = $sections["Root.Config.$configIndex.Settings.7"]
+        $pathsSection = $sections["Root.Config.$configIndex.Settings.1"]
+
+        $configDefinitions[$configName] = @{
+            Index            = $configIndex
+            OutputFolder     = $section['OutputFolder']
+            TargetFileName   = $section['Target']
+            CompileCommand   = $compileSection['String.3.0']
+            LinkCommand      = $linkSection['String.3.0']
+            PostBuildCommand = $postBuildSection['String.3.0']
+            IncludePaths     = $pathsSection['String.103.0']
+        }
+    }
+
+    $sourceFiles = @()
+    $currentSection = $sections['Root.Source Files']['Child']
+    while (-not [string]::IsNullOrWhiteSpace($currentSection)) {
+        $fileSection = $sections[$currentSection]
+        if (-not $fileSection) {
+            break
+        }
+
+        if ($fileSection['ElemType'] -eq 'File') {
+            $sourceFiles += $fileSection['PathName']
+        }
+
+        $currentSection = $fileSection['Next']
+    }
+
+    return @{
+        Configs     = $configDefinitions
+        SourceFiles = $sourceFiles
+    }
+}
+
+function Get-IncludeArguments {
+    param([string]$IncludePaths)
+
+    $args = @()
+    foreach ($pathEntry in ($IncludePaths -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($pathEntry)) {
+            continue
+        }
+
+        $normalized = $pathEntry.Trim()
+        if ($normalized -eq '.') {
+            continue
+        }
+
+        $normalized = $normalized.TrimEnd('\')
+        if ($normalized -eq '.\') {
+            continue
+        }
+
+        $args += "-i$normalized"
+    }
+
+    return $args
+}
+
+function Invoke-StvdProjectBuildConfiguration {
     param(
         [string]$ProjectRootPath,
-        [string]$OutputFolderName,
-        [string]$TargetName,
-        [int]$DisplayCommonAnode,
+        [hashtable]$ProjectDefinition,
+        [string]$ConfigName,
         [string]$CxPath,
         [string]$ClnkPath,
         [string]$ChexPath
     )
 
-    $sourceFiles = @(
-        "main.c",
-        "Si5351_i2c.c",
-        "src\stm8s_clk.c",
-        "src\stm8s_delay.c",
-        "src\stm8s_flash.c",
-        "src\stm8s_gpio.c",
-        "src\stm8s_i2c.c",
-        "src\stm8s_spi.c",
-        "src\stm8s_tim1.c",
-        "stm8_interrupt_vector.c"
-    )
+    $config = $ProjectDefinition.Configs[$ConfigName]
+    if (-not $config) {
+        throw "STVD config '$ConfigName' was not found in project definition."
+    }
 
-    $outputPath = Join-Path $ProjectRootPath $OutputFolderName
+    $targetBaseName = [System.IO.Path]::GetFileNameWithoutExtension($config.TargetFileName)
+    $outputPath = Join-Path $ProjectRootPath $config.OutputFolder
     if (-not (Test-Path $outputPath)) {
         New-Item -ItemType Directory -Path $outputPath | Out-Null
     }
 
     $outputPathAbs = (Resolve-Path $outputPath).Path
+    $includeArgs = Get-IncludeArguments -IncludePaths $config.IncludePaths
 
-    foreach ($src in $sourceFiles) {
+    $displayCommonAnodeMatch = [regex]::Match($config.CompileCommand, '-dDISPLAY_COMMON_ANODE=(\d+)')
+    if (-not $displayCommonAnodeMatch.Success) {
+        throw "Failed to parse DISPLAY_COMMON_ANODE value from STVD compile command for '$ConfigName'."
+    }
+
+    $displayCommonAnode = $displayCommonAnodeMatch.Groups[1].Value
+
+    foreach ($src in $ProjectDefinition.SourceFiles) {
         $srcPath = Join-Path $ProjectRootPath $src
         Assert-File $srcPath
 
         $compileArgs = @(
-            "+mods0",
-            "+compact",
-            "-dDISPLAY_COMMON_ANODE=$DisplayCommonAnode",
-            "-iinc",
-            "-isrc",
+            '+mods0',
+            '+compact',
+            "-dDISPLAY_COMMON_ANODE=$displayCommonAnode"
+        ) + $includeArgs + @(
             "-cl$outputPathAbs\\",
             "-co$outputPathAbs\\",
             $srcPath
         )
 
-        Invoke-External -ExePath $CxPath -CmdLineArgs $compileArgs -ErrorContext "Compile failed for '$src'"
+        Invoke-External -ExePath $CxPath -CmdLineArgs $compileArgs -ErrorContext "Compile failed for '$src' in '$ConfigName'"
     }
 
-    $lkfPath = Join-Path $outputPathAbs ("{0}.lkf" -f $TargetName)
-    $autoGeneratedMarker = "# Auto-generated by publish-release.ps1"
-    $shouldGenerateLkf = -not (Test-Path $lkfPath)
-
-    if (-not $shouldGenerateLkf) {
-        $existingLkf = Get-Content -Path $lkfPath -Raw
-        if ($existingLkf -match [regex]::Escape($autoGeneratedMarker)) {
-            Write-Info "Refreshing auto-generated linker config: $lkfPath"
-            $shouldGenerateLkf = $true
-        }
-    }
-
-    if ($shouldGenerateLkf) {
-        if (-not (Test-Path $lkfPath)) {
-            Write-Warning "Linker config not found, generating: $lkfPath"
-        }
-
-        $objectNames = @(
-            "main.o",
-            "Si5351_i2c.o",
-            "stm8s_clk.o",
-            "stm8s_delay.o",
-            "stm8s_flash.o",
-            "stm8s_gpio.o",
-            "stm8s_i2c.o",
-            "stm8s_spi.o",
-            "stm8s_tim1.o",
-            "stm8_interrupt_vector.o"
-        )
-
-        foreach ($objName in $objectNames) {
-            Assert-File (Join-Path $outputPathAbs $objName)
-        }
-
-        $templateContent = @"
-# LINK COMMAND FILE AUTOMATICALLY GENERATED BY publish-release.ps1 (STVD-compatible style)
+    $lkfPath = Join-Path $outputPathAbs ("{0}.lkf" -f $targetBaseName)
+    $autoGeneratedMarker = '# Auto-generated by publish-release-stvd.ps1'
+    $templateContent = @"
+# LINK COMMAND FILE AUTOMATICALLY GENERATED BY publish-release-stvd.ps1 (STVD project-driven)
 # Segment Code,Constants:
-+seg .const -b 0x8080 -m 0x1f80  -n .const -it 
-+seg .text -a .const  -n .text 
++seg .const -b 0x8080 -m 0x1f80 -n .const -it
++seg .text -a .const -n .text
 # Segment Eeprom:
-+seg .eeprom -b 0x4000 -m 0x280  -n .eeprom 
++seg .eeprom -b 0x4000 -m 0x280 -n .eeprom
 # Segment Zero Page:
-+seg .bsct -b 0x0 -m 0x100  -n .bsct 
-+seg .ubsct -a .bsct  -n .ubsct 
-+seg .bit -a .ubsct  -n .bit -id 
-+seg .share -a .bit  -n .share -is 
++seg .bsct -b 0x0 -m 0x100 -n .bsct
++seg .ubsct -a .bsct -n .ubsct
++seg .bit -a .ubsct -n .bit -id
++seg .share -a .bit -n .share -is
 # Segment Ram:
-+seg .data -b 0x100 -m 0x100  -n .data 
-+seg .bss -a .data  -n .bss 
++seg .data -b 0x100 -m 0x100 -n .data
++seg .bss -a .data -n .bss
 
 # Startup file
 crtsi0.sm8
 
 # Object files
-$OutputFolderName\main.o
-$OutputFolderName\Si5351_i2c.o
-$OutputFolderName\stm8s_clk.o
-$OutputFolderName\stm8s_delay.o
-$OutputFolderName\stm8s_flash.o
-$OutputFolderName\stm8s_gpio.o
-$OutputFolderName\stm8s_i2c.o
-$OutputFolderName\stm8s_spi.o
-$OutputFolderName\stm8s_tim1.o
+$(($ProjectDefinition.SourceFiles | Where-Object {
+    [System.IO.Path]::GetFileName($_) -ne 'stm8_interrupt_vector.c'
+} | ForEach-Object {
+    '{0}\{1}.o' -f $config.OutputFolder, [System.IO.Path]::GetFileNameWithoutExtension($_)
+}) -join "`r`n")
 
 # Library list
 libis0.sm8
 libm0.sm8
 
-# Interrupt vectors
-+seg .const -b 0x8000 -k
-$OutputFolderName\stm8_interrupt_vector.o
-
 # Defines
-+def __endzp=@.ubsct            # end of uninitialized zpage
-+def __memory=@.bss             # end of bss segment
++def __endzp=@.ubsct
++def __memory=@.bss
 +def __startmem=@.bss
 +def __endmem=0x1ff
 +def __stack=0x3ff
 
+# Interrupt vectors
++seg .const -b 0x8000 -k
+$($config.OutputFolder)\stm8_interrupt_vector.o
+
 $autoGeneratedMarker
 "@
+    Set-Content -Path $lkfPath -Value $templateContent -Encoding ASCII
 
-        Set-Content -Path $lkfPath -Value $templateContent -Encoding ASCII
-        Write-Info "Generated linker config (built-in STVD-style template): $lkfPath"
-    }
-
-    $sm8Path = Join-Path $outputPathAbs ("{0}.sm8" -f $TargetName)
-    $s19Path = Join-Path $outputPathAbs ("{0}.s19" -f $TargetName)
-
-    $mapPath = Join-Path $outputPathAbs ("{0}.map" -f $TargetName)
+    $sm8Path = Join-Path $outputPathAbs ("{0}.sm8" -f $targetBaseName)
+    $s19Path = Join-Path $outputPathAbs ("{0}.s19" -f $targetBaseName)
+    $mapPath = Join-Path $outputPathAbs ("{0}.map" -f $targetBaseName)
 
     Push-Location $ProjectRootPath
     try {
-        Invoke-External -ExePath $ClnkPath -CmdLineArgs @("-m$mapPath", "-o$sm8Path", $lkfPath) -ErrorContext "Link failed for '$TargetName'"
+        Invoke-External -ExePath $ClnkPath -CmdLineArgs @("-m$mapPath", "-o$sm8Path", $lkfPath) -ErrorContext "Link failed for '$ConfigName'"
     }
     finally {
         Pop-Location
     }
 
-    Invoke-External -ExePath $ChexPath -CmdLineArgs @("-o$s19Path", $sm8Path) -ErrorContext "S19 generation failed for '$TargetName'"
+    Invoke-External -ExePath $ChexPath -CmdLineArgs @("-o$s19Path", $sm8Path) -ErrorContext "S19 generation failed for '$ConfigName'"
 }
 
 $mainHeaderPath = Join-Path $ProjectRoot $MainHeaderFile
@@ -365,6 +404,13 @@ $caS19 = Join-Path $ProjectRoot "Release_CA\z80_tester_ca.s19"
 
 Write-Step "Checking required tools and repository state"
 Assert-Tool "git"
+Assert-File $projectPath
+Assert-File $StvdPath
+
+$cxTool = $null
+$clnkTool = $null
+$chexTool = $null
+$projectDefinition = $null
 
 $hasGh = Test-ToolExists "gh"
 if (-not $hasGh -and -not $SkipPublish) {
@@ -374,17 +420,16 @@ if (-not $hasGh -and -not $SkipPublish) {
     $SkipPublish = $true
 }
 
-Assert-File $projectPath
+Write-Info "Using STVD project file: $projectPath"
+Write-Info "Using STVD installation: $StvdPath"
 
-$cxTool = $null
-$clnkTool = $null
-$chexTool = $null
 if (-not $SkipBuild) {
-    $cxTool = Resolve-CosmicTool -ExeName "cxstm8.exe" -BinPath $CosmicBinPath
-    $clnkTool = Resolve-CosmicTool -ExeName "clnk.exe" -BinPath $CosmicBinPath
-    $chexTool = Resolve-CosmicTool -ExeName "chex.exe" -BinPath $CosmicBinPath
+    $cxTool = Resolve-CosmicTool -ExeName 'cxstm8.exe' -BinPath $CosmicBinPath
+    $clnkTool = Resolve-CosmicTool -ExeName 'clnk.exe' -BinPath $CosmicBinPath
+    $chexTool = Resolve-CosmicTool -ExeName 'chex.exe' -BinPath $CosmicBinPath
+    $projectDefinition = Get-StvdProjectDefinition -ProjectPath $projectPath
 
-    Write-Info "Using COSMIC tools:"
+    Write-Info "Using STM8 Cosmic tools from STVD project settings:"
     Write-Info " - cxstm8: $cxTool"
     Write-Info " - clnk:   $clnkTool"
     Write-Info " - chex:   $chexTool"
@@ -409,10 +454,10 @@ try {
         }
     }
 
-    Write-Step "Building Release_CC and Release_CA"
+    Write-Step "Building Release_CC and Release_CA from STVD project settings"
     if (-not $SkipBuild) {
-        Invoke-CosmicBuildVariant -ProjectRootPath $ProjectRoot -OutputFolderName "Release_CC" -TargetName "z80_tester_cc" -DisplayCommonAnode 0 -CxPath $cxTool -ClnkPath $clnkTool -ChexPath $chexTool
-        Invoke-CosmicBuildVariant -ProjectRootPath $ProjectRoot -OutputFolderName "Release_CA" -TargetName "z80_tester_ca" -DisplayCommonAnode 1 -CxPath $cxTool -ClnkPath $clnkTool -ChexPath $chexTool
+        Invoke-StvdProjectBuildConfiguration -ProjectRootPath $ProjectRoot -ProjectDefinition $projectDefinition -ConfigName 'Release_CC' -CxPath $cxTool -ClnkPath $clnkTool -ChexPath $chexTool
+        Invoke-StvdProjectBuildConfiguration -ProjectRootPath $ProjectRoot -ProjectDefinition $projectDefinition -ConfigName 'Release_CA' -CxPath $cxTool -ClnkPath $clnkTool -ChexPath $chexTool
     } else {
         Write-Info "Skipping build step as requested."
     }
@@ -454,7 +499,7 @@ Release assets:
 - z80_tester_cc.s19: Common cathode firmware (DISPLAY_COMMON_ANODE=0).
 - z80_tester_ca.s19: Common anode firmware (DISPLAY_COMMON_ANODE=1).
 
-    The `.s19` files are the firmware images that should be programmed into the STM8 MCU using ST Visual Programmer (STVP).
+The .s19 files are the firmware images that should be programmed into the STM8 MCU using ST Visual Programmer (STVP).
 "@
 
         if ($Draft) {
