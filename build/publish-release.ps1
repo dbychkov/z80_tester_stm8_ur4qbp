@@ -1,45 +1,47 @@
 <#
-        Script: publish-release.ps1
-        Author: dbychkov
-        Created: 2026-04-26
+    Script: publish-release.ps1
+    Author: dbychkov
+    Created: 2026-04-26
 
-        Purpose:
-            Build Release_CC and Release_CA firmware, create/push a git tag,
-            and publish a GitHub release with both .s19 assets.
+    Purpose:
+      Build Release_CC and Release_CA firmware with COSMIC command-line tools
+      (headless), create/push a git tag, and publish a GitHub release with
+      both .s19 assets.
 
-        Prerequisites:
-            - STVD installed (or pass -StvdExePath)
-            - git and gh available in PATH
-            - Run from inside repository (default ProjectRoot = parent of this script folder)
+    Prerequisites:
+      - COSMIC CXSTM8 tools installed (cxstm8.exe, clnk.exe, chex.exe)
+      - git and optionally gh available in PATH
+      - Run from inside repository (default ProjectRoot = parent of this script folder)
 
-        Version behavior:
-            - If -Version is provided, it is used as release tag version.
-            - If -Version is omitted, version is auto-derived from main.h:
-              v<FIRMWARE_VERSION_MAJOR>.<FIRMWARE_VERSION_MINOR>.0
+    Version behavior:
+      - If -Version is provided, it is used as release tag version.
+      - If -Version is omitted, version is auto-derived from main.h:
+        v<FIRMWARE_VERSION_MAJOR>.<FIRMWARE_VERSION_MINOR>.0
 
-        Typical usage:
-            .\publish-release.ps1 -Version v1.2.0
-            .\publish-release.ps1
-            .\publish-release.ps1 -Draft
-            .\publish-release.ps1 -SkipBuild -AllowDirty
+    Typical usage:
+      .\publish-release.ps1
+      .\publish-release.ps1 -Version v1.2.0
+      .\publish-release.ps1 -Preflight -SkipBuild
+      .\publish-release.ps1 -SkipPublish
 
-        Optional flags:
-            -Draft        Create a draft GitHub release
-            -SkipBuild    Skip STVD build and only publish existing artifacts
-            -SkipPublish  Skip GitHub release publishing step
-            -Preflight    Validate prerequisites and inputs, then exit
-            -AllowDirty   Allow uncommitted changes in working tree
+    Optional flags:
+      -Draft        Create a draft GitHub release
+      -SkipBuild    Skip firmware build steps
+      -SkipPublish  Skip GitHub release publishing step
+      -Preflight    Validate prerequisites and inputs, then exit
+      -AllowDirty   Allow uncommitted changes in working tree
 
-        Optional file parameters:
-            -ProjectRoot      Project root path (defaults to build\..)
-            -ProjectFile      STVD project file (default: z80_tester.stp)
-            -MainHeaderFile   Header file with FIRMWARE_VERSION_* defines (default: main.h)
-            -ReleaseNotesFile Path to custom release notes for gh release create
-            -StvdExePath      Explicit path to STVD.exe
+    Optional file parameters:
+      -ProjectRoot      Project root path (defaults to build\..)
+      -ProjectFile      STVD project file (default: z80_tester.stp)
+      -MainHeaderFile   Header file with FIRMWARE_VERSION_* defines (default: main.h)
+      -ReleaseNotesFile Path to custom release notes for gh release create
+      -CosmicBinPath    Explicit folder containing cxstm8.exe/clnk.exe/chex.exe
 
-        Change Log:
-            - 2026-04-26 dbychkov: Initial script header and release automation.
-            - 2026-04-26 dbychkov: Added auto-version from main.h and build folder root handling.
+    Change Log:
+      - 2026-04-26 dbychkov: Initial script header and release automation.
+      - 2026-04-26 dbychkov: Added auto-version from main.h and build folder root handling.
+      - 2026-04-26 dbychkov: Switched build flow to direct COSMIC headless commands.
 #>
 
 param(
@@ -49,8 +51,8 @@ param(
     [string]$ProjectRoot = (Join-Path $PSScriptRoot ".."),
     [string]$ProjectFile = "z80_tester.stp",
     [string]$MainHeaderFile = "main.h",
-    [string]$StvdExePath,
     [string]$ReleaseNotesFile,
+    [string]$CosmicBinPath,
 
     [switch]$Draft,
     [switch]$SkipBuild,
@@ -72,63 +74,6 @@ function Write-Info {
     Write-Host "[INFO] $Message" -ForegroundColor Gray
 }
 
-function Resolve-StvdPath {
-    param([string]$UserPath)
-
-    if ($UserPath) {
-        if (Test-Path $UserPath) {
-            return (Resolve-Path $UserPath).Path
-        }
-        throw "STVD executable not found at: $UserPath"
-    }
-
-    $candidates = @(
-        "C:\Program Files (x86)\STMicroelectronics\st_toolset\stvd\STVD.exe",
-        "C:\Program Files\STMicroelectronics\st_toolset\stvd\STVD.exe",
-        "C:\Program Files (x86)\STMicroelectronics\st_toolset\stvd\stvdebug.exe",
-        "C:\Program Files\STMicroelectronics\st_toolset\stvd\stvdebug.exe"
-    )
-
-    foreach ($path in $candidates) {
-        if (Test-Path $path) {
-            return $path
-        }
-    }
-
-    $fromPathStvd = Get-Command STVD.exe -ErrorAction SilentlyContinue
-    if ($fromPathStvd) {
-        return $fromPathStvd.Source
-    }
-
-    $fromPathStvDebug = Get-Command stvdebug.exe -ErrorAction SilentlyContinue
-    if ($fromPathStvDebug) {
-        return $fromPathStvDebug.Source
-    }
-
-    throw "STVD executable not found (checked STVD.exe and stvdebug.exe). Install ST Visual Develop, or pass -StvdExePath explicitly. If firmware is already built, rerun with -SkipBuild."
-}
-
-function Invoke-StvdBuild {
-    param(
-        [string]$StvdExe,
-        [string]$ProjectPath,
-        [string]$Configuration
-    )
-
-    # STVD command-line support varies by version. This uses the common project/config build pattern.
-    $args = @(
-        "-Project", $ProjectPath,
-        "-Configuration", $Configuration,
-        "-Build"
-    )
-
-    Write-Info "Running: $StvdExe $($args -join ' ')"
-    $proc = Start-Process -FilePath $StvdExe -ArgumentList $args -Wait -PassThru -NoNewWindow
-    if ($proc.ExitCode -ne 0) {
-        throw "STVD build failed for '$Configuration' (exit code $($proc.ExitCode))."
-    }
-}
-
 function Assert-Tool {
     param([string]$Tool)
     if (-not (Get-Command $Tool -ErrorAction SilentlyContinue)) {
@@ -136,7 +81,7 @@ function Assert-Tool {
     }
 }
 
-function Has-Tool {
+function Test-ToolExists {
     param([string]$Tool)
     return [bool](Get-Command $Tool -ErrorAction SilentlyContinue)
 }
@@ -145,6 +90,53 @@ function Assert-File {
     param([string]$Path)
     if (-not (Test-Path $Path)) {
         throw "Required file not found: $Path"
+    }
+}
+
+function Resolve-CosmicTool {
+    param(
+        [string]$ExeName,
+        [string]$BinPath
+    )
+
+    if ($BinPath) {
+        $candidate = Join-Path $BinPath $ExeName
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+        throw "COSMIC tool not found at: $candidate"
+    }
+
+    $fromPath = Get-Command $ExeName -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        return $fromPath.Source
+    }
+
+    $candidates = @(
+        ("C:\Program Files (x86)\COSMIC\FSE_Compilers\CXSTM8\{0}" -f $ExeName),
+        ("C:\Program Files\COSMIC\FSE_Compilers\CXSTM8\{0}" -f $ExeName)
+    )
+
+    foreach ($path in $candidates) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+
+    throw "Required COSMIC tool '$ExeName' not found. Add it to PATH or pass -CosmicBinPath."
+}
+
+function Invoke-External {
+    param(
+        [string]$ExePath,
+        [string[]]$CmdLineArgs,
+        [string]$ErrorContext
+    )
+
+    Write-Info "Running: $ExePath $($CmdLineArgs -join ' ')"
+    & $ExePath @CmdLineArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "$ErrorContext (exit code $LASTEXITCODE)."
     }
 }
 
@@ -164,6 +156,65 @@ function Get-VersionFromMainHeader {
     return "v$major.$minor.0"
 }
 
+function Invoke-CosmicBuildVariant {
+    param(
+        [string]$ProjectRootPath,
+        [string]$OutputFolderName,
+        [string]$TargetName,
+        [int]$DisplayCommonAnode,
+        [string]$CxPath,
+        [string]$ClnkPath,
+        [string]$ChexPath
+    )
+
+    $sourceFiles = @(
+        "main.c",
+        "Si5351_i2c.c",
+        "src\stm8s_clk.c",
+        "src\stm8s_delay.c",
+        "src\stm8s_flash.c",
+        "src\stm8s_gpio.c",
+        "src\stm8s_i2c.c",
+        "src\stm8s_spi.c",
+        "src\stm8s_tim1.c",
+        "stm8_interrupt_vector.c"
+    )
+
+    $outputPath = Join-Path $ProjectRootPath $OutputFolderName
+    if (-not (Test-Path $outputPath)) {
+        New-Item -ItemType Directory -Path $outputPath | Out-Null
+    }
+
+    $outputPathAbs = (Resolve-Path $outputPath).Path
+
+    foreach ($src in $sourceFiles) {
+        $srcPath = Join-Path $ProjectRootPath $src
+        Assert-File $srcPath
+
+        $compileArgs = @(
+            "+mods0",
+            "+compact",
+            "-dDISPLAY_COMMON_ANODE=$DisplayCommonAnode",
+            "-iinc",
+            "-isrc",
+            "-cl$outputPathAbs\\",
+            "-co$outputPathAbs\\",
+            $srcPath
+        )
+
+        Invoke-External -ExePath $CxPath -CmdLineArgs $compileArgs -ErrorContext "Compile failed for '$src'"
+    }
+
+    $lkfPath = Join-Path $outputPathAbs ("{0}.lkf" -f $TargetName)
+    Assert-File $lkfPath
+
+    $sm8Path = Join-Path $outputPathAbs ("{0}.sm8" -f $TargetName)
+    $s19Path = Join-Path $outputPathAbs ("{0}.s19" -f $TargetName)
+
+    Invoke-External -ExePath $ClnkPath -CmdLineArgs @("-o$sm8Path", $lkfPath) -ErrorContext "Link failed for '$TargetName'"
+    Invoke-External -ExePath $ChexPath -CmdLineArgs @("-o$s19Path", $sm8Path) -ErrorContext "S19 generation failed for '$TargetName'"
+}
+
 $mainHeaderPath = Join-Path $ProjectRoot $MainHeaderFile
 $resolvedVersion = $Version
 if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
@@ -180,7 +231,7 @@ $caS19 = Join-Path $ProjectRoot "Release_CA\z80_tester_ca.s19"
 Write-Step "Checking required tools and repository state"
 Assert-Tool "git"
 
-$hasGh = Has-Tool "gh"
+$hasGh = Test-ToolExists "gh"
 if (-not $hasGh -and -not $SkipPublish) {
     Write-Warning "GitHub CLI (gh) was not found in PATH. Switching to -SkipPublish mode."
     Write-Warning "Install gh from https://cli.github.com/ to enable automated release publishing."
@@ -188,11 +239,21 @@ if (-not $hasGh -and -not $SkipPublish) {
     $SkipPublish = $true
 }
 
-if (-not $SkipBuild) {
-    $null = Resolve-StvdPath -UserPath $StvdExePath
-}
-
 Assert-File $projectPath
+
+$cxTool = $null
+$clnkTool = $null
+$chexTool = $null
+if (-not $SkipBuild) {
+    $cxTool = Resolve-CosmicTool -ExeName "cxstm8.exe" -BinPath $CosmicBinPath
+    $clnkTool = Resolve-CosmicTool -ExeName "clnk.exe" -BinPath $CosmicBinPath
+    $chexTool = Resolve-CosmicTool -ExeName "chex.exe" -BinPath $CosmicBinPath
+
+    Write-Info "Using COSMIC tools:"
+    Write-Info " - cxstm8: $cxTool"
+    Write-Info " - clnk:   $clnkTool"
+    Write-Info " - chex:   $chexTool"
+}
 
 if ($Preflight) {
     Write-Host "Preflight checks passed." -ForegroundColor Green
@@ -215,9 +276,8 @@ try {
 
     Write-Step "Building Release_CC and Release_CA"
     if (-not $SkipBuild) {
-        $stvd = Resolve-StvdPath -UserPath $StvdExePath
-        Invoke-StvdBuild -StvdExe $stvd -ProjectPath $projectPath -Configuration "Release_CC"
-        Invoke-StvdBuild -StvdExe $stvd -ProjectPath $projectPath -Configuration "Release_CA"
+        Invoke-CosmicBuildVariant -ProjectRootPath $ProjectRoot -OutputFolderName "Release_CC" -TargetName "z80_tester_cc" -DisplayCommonAnode 0 -CxPath $cxTool -ClnkPath $clnkTool -ChexPath $chexTool
+        Invoke-CosmicBuildVariant -ProjectRootPath $ProjectRoot -OutputFolderName "Release_CA" -TargetName "z80_tester_ca" -DisplayCommonAnode 1 -CxPath $cxTool -ClnkPath $clnkTool -ChexPath $chexTool
     } else {
         Write-Info "Skipping build step as requested."
     }
