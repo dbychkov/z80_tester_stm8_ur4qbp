@@ -21,6 +21,7 @@
     Typical usage:
       .\publish-release.ps1
       .\publish-release.ps1 -Version v1.2.0
+      .\publish-release.ps1 -AllowDirty -Version v1.2.0
       .\publish-release.ps1 -Preflight -SkipBuild
       .\publish-release.ps1 -SkipPublish
 
@@ -143,6 +144,13 @@ function Invoke-External {
 function Get-VersionFromMainHeader {
     param([string]$HeaderPath)
 
+    $versions = Get-FirmwareVersionsFromMainHeader -HeaderPath $HeaderPath
+    return $versions.ReleaseVersion
+}
+
+function Get-FirmwareVersionsFromMainHeader {
+    param([string]$HeaderPath)
+
     $content = Get-Content -Path $HeaderPath -Raw
     $majorMatch = [regex]::Match($content, '(?m)^\s*#define\s+FIRMWARE_VERSION_MAJOR\s+(\d+)\s*$')
     $minorMatch = [regex]::Match($content, '(?m)^\s*#define\s+FIRMWARE_VERSION_MINOR\s+(\d+)\s*$')
@@ -153,7 +161,12 @@ function Get-VersionFromMainHeader {
 
     $major = $majorMatch.Groups[1].Value
     $minor = $minorMatch.Groups[1].Value
-    return "v$major.$minor.0"
+    return @{
+        Major          = $major
+        Minor          = $minor
+        CodeVersion    = "v$major.$minor"
+        ReleaseVersion = "v$major.$minor.0"
+    }
 }
 
 function Invoke-CosmicBuildVariant {
@@ -216,10 +229,13 @@ function Invoke-CosmicBuildVariant {
 }
 
 $mainHeaderPath = Join-Path $ProjectRoot $MainHeaderFile
+Assert-File $mainHeaderPath
+$firmwareVersions = Get-FirmwareVersionsFromMainHeader -HeaderPath $mainHeaderPath
+$codeVersion = $firmwareVersions.CodeVersion
+
 $resolvedVersion = $Version
 if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
-    Assert-File $mainHeaderPath
-    $resolvedVersion = Get-VersionFromMainHeader -HeaderPath $mainHeaderPath
+    $resolvedVersion = $firmwareVersions.ReleaseVersion
     Write-Info "Auto-derived release version from ${MainHeaderFile}: $resolvedVersion"
 }
 
@@ -312,15 +328,28 @@ try {
         Write-Step "Publishing GitHub release with both .s19 assets"
         $ghArgs = @("release", "create", $normalizedVersion, $ccS19, $caS19, "--title", $normalizedVersion)
 
+        $assetNotes = @"
+Firmware code version: $codeVersion
+
+Release assets:
+- z80_tester_cc.s19: Common cathode firmware (DISPLAY_COMMON_ANODE=0).
+- z80_tester_ca.s19: Common anode firmware (DISPLAY_COMMON_ANODE=1).
+"@
+
         if ($Draft) {
             $ghArgs += "--draft"
         }
 
         if ($ReleaseNotesFile) {
             Assert-File $ReleaseNotesFile
-            $ghArgs += @("--notes-file", $ReleaseNotesFile)
+            $customNotes = Get-Content -Path $ReleaseNotesFile -Raw
+            if ([string]::IsNullOrWhiteSpace($customNotes)) {
+                $ghArgs += @("--notes", $assetNotes)
+            } else {
+                $ghArgs += @("--notes", ($assetNotes + "`r`n" + $customNotes))
+            }
         } else {
-            $ghArgs += @("--generate-notes")
+            $ghArgs += @("--notes", $assetNotes, "--generate-notes")
         }
 
         & gh @ghArgs
