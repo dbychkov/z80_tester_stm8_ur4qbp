@@ -29,6 +29,21 @@
 #define SI5351_PLL_FREQ	      800000000uL
 extern unsigned long XTAL_FREQ = 25000000;   //Crystal frequency
 
+
+#define I2C_TIMEOUT_VAL  10000u
+static bool I2C_WaitEvent(I2C_Event_TypeDef event)
+{
+    unsigned int t = I2C_TIMEOUT_VAL;
+    while (!I2C_CheckEvent(event)) {
+        if (!--t) { I2C_GenerateSTOP(ENABLE); return FALSE; }
+    }
+    return TRUE;
+}
+
+#define I2C_WAIT(event) if (!I2C_WaitEvent(event)) return;
+#define I2C_WAIT_R(event) if (!I2C_WaitEvent(event)) return 0;
+
+
 void SI5351_I2C_Init(void)
 {
 	GPIO_DeInit(GPIOB);
@@ -243,7 +258,6 @@ static void SI5351_SetFrequencyA(unsigned long frequency)
 }
 
 
-
 static void SI5351_Init(void)
 {
 	SI5351_I2C_Init();   
@@ -257,4 +271,49 @@ static void SI5351_Init(void)
 	// Finally switch on the CLK1 output (0x4F)
 	// and set the MultiSynth0 input to be PLL B
 	SI5351_SendRegister(SI5351a_CLK1_CONTROL, 0x4F | SI5351a_CLK_SRC_PLL_B);
+}
+
+
+
+unsigned char SI5351_ReadRegister(unsigned char reg_address)
+{
+    unsigned char data;
+    
+    // Start I2C communication
+    I2C_GenerateSTART(ENABLE);
+    I2C_WAIT_R(I2C_EVENT_MASTER_MODE_SELECT)
+    
+    // Send SI5351A address with WRITE bit
+    I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_TX);
+    I2C_WAIT_R(I2C_EVENT_MASTER_TRANSMITTER_MODE_SELECTED)
+    
+    // Send register address
+    I2C_SendData(reg_address);
+    I2C_WAIT_R(I2C_EVENT_MASTER_BYTE_TRANSMITTED)
+    
+    // Repeated START
+    I2C_GenerateSTART(ENABLE);
+    I2C_WAIT_R(I2C_EVENT_MASTER_MODE_SELECT)
+    
+    // Send SI5351A address with READ bit
+    I2C_Send7bitAddress(SI5351_I2C_ADDR, I2C_DIRECTION_RX);
+    I2C_WAIT_R(I2C_EVENT_MASTER_RECEIVER_MODE_SELECTED)
+    
+    // For single byte read: disable ACK and generate STOP immediately after
+    // clearing ADDR (i.e. after EVENT_MASTER_RECEIVER_MODE_SELECTED above),
+    // BEFORE the byte is received. If STOP is generated after reading, the
+    // STM8 I2C peripheral has already ACK'd and started clocking a second byte.
+    I2C_AcknowledgeConfig(I2C_ACK_NONE);
+    I2C_GenerateSTOP(ENABLE);
+    
+    // Wait for data
+    I2C_WAIT_R(I2C_EVENT_MASTER_BYTE_RECEIVED)
+    
+    // Read data
+    data = I2C_ReceiveData();
+    
+    // Re-enable ACK for future transactions
+    I2C_AcknowledgeConfig(I2C_ACK_CURR);
+    
+    return data;
 }

@@ -6,7 +6,3 @@ Keyword=ST7Workspace-V0.7
 [Project0]
 Filename=z80_tester.stp
 Dependencies=
-[Options]
-ActiveProject=z80_tester
-ActiveConfig=Debug
-AddSortedElements=1

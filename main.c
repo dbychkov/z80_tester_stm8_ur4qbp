@@ -86,24 +86,79 @@ const unsigned char number[] = //¬ этом массиве задаютс€ цифры на семисегментном
 #define SEG_DP_ON GPIO_WriteHigh(SEG_DP_PORT, SEG_DP)
 #endif
 
-unsigned char freq, freq_max = 40, freq_min = 1;
-unsigned char t, t_delay = 1;
-bool dp_flag = 0;
 
+// Function prototypes
 void SendSeg(const unsigned char byte); //«апись сегментов в индикатор
 void FLASH_Write(unsigned int WriteAddr, unsigned char val);
 void CPU_Set(void);
 void Check_Freq(void);
+void PowerOn_I2C_Check(void);
+void SI5351_WaitPLLLock(void);
 
+// Variables
+unsigned char freq, freq_max = 40, freq_min = 1;
+unsigned char t, t_delay = 1;
+bool dp_flag = 0;
+unsigned char status;
+
+
+void PowerOn_I2C_Check(void)
+{
+	// Power-on I2C BUSY lockup fix.
+	// At cold power-on the STM8 and SI5351A start simultaneously. Bus glitches
+	// during SI5351A power-on cause the STM8 I2C BUSY flag to get stuck Ч only
+	// a hardware reset can clear it, not software re-init.
+	//
+	// Boot 1 Ч cold power-on (WWDGF=0):
+	//   !(RST->SR & 0x01) is TRUE. I2C peripheral is uninitialized so
+	//   SI5351_ReadRegister times out and returns 0. 0 != 0x4F ? WWDG fires.
+	//   SI5351A stays powered through the reset.
+	//
+	// Boot 2 Ч after WWDG reset (WWDGF=1):
+	//   !(RST->SR & 0x01) is FALSE ? && short-circuits, no I2C call made.
+	//   Normal boot proceeds; SI5351A already initialized ? I2C works.
+	//   RST->SR cleared so next cold power-on triggers Boot 1 again.
+	if (!(RST->SR & 0x01) && (SI5351_ReadRegister(16) != (0x4F | SI5351a_CLK_SRC_PLL_A))) {
+		WWDG->CR = 0x80; // WDGA=1, T6=0: immediate reset
+		while(1) {}
+	}
+	RST->SR = 0x00; // clear WWDGF so next power-on triggers the reset again
+}
+
+void SI5351_WaitPLLLock(void)
+{
+	// Wait for PLL to lock before releasing Z80 reset.
+	// CLK0 output is unstable until LOL_A (bit 5) and SYS_INIT (bit 7) clear.
+	// Retries PLL reset once on timeout; gives up after 3 retries to avoid hang.
+	unsigned char lock_wait = 0;
+	unsigned char retries = 0;
+	do {
+		delay_ms(100);
+		status = SI5351_ReadRegister(0);
+		if (++lock_wait > 20) {
+			SI5351_SendRegister(SI5351a_PLL_RESET, 0x20);
+			lock_wait = 0;
+			if (++retries > 3) break; // give up after ~8s total
+		}
+	} while (status & (0x20 | 0x80));
+}
+
+
+// Main function
 void main(void)
 {
+PowerOn_I2C_Check();
+
 CPU_Set();
 GPIO_WriteHigh(RST_Z80_PORT, RST_Z80); dp_flag = 1;
 SI5351_I2C_Init(); 
 freq = FLASH_ReadByte(0x4000); delay_ms(100);
 SI5351_SetFrequencyA(freq*1000000);
 delay_ms(400);
+
+SI5351_WaitPLLLock();
 GPIO_WriteLow(RST_Z80_PORT, RST_Z80); dp_flag = 0;
+
 //*********************************************************	
 while (1)
 	{
