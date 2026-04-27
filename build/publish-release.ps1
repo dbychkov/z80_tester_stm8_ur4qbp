@@ -3,47 +3,92 @@
     Author: dbychkov
     Created: 2026-04-26
 
-    Purpose:
-      Build Release_CC and Release_CA firmware with COSMIC command-line tools
-      (headless), create/push a git tag, and publish a GitHub release with
-      both .s19 assets.
+    PURPOSE:
+      Builds Release_CC and Release_CA firmware variants using hardcoded COSMIC
+      compiler and linker commands, creates a git tag, and publishes a GitHub
+      release with both .s19 assets.
 
-    Prerequisites:
-      - COSMIC CXSTM8 tools installed (cxstm8.exe, clnk.exe, chex.exe)
-      - git and optionally gh available in PATH
-      - Run from inside repository (default ProjectRoot = parent of this script folder)
+      THIS IS THE LEGACY/ORIGINAL SCRIPT - USE publish-release-stp.ps1 INSTEAD.
 
-    Version behavior:
-      - If -Version is provided, it is used as release tag version.
-      - If -Version is omitted, version is auto-derived from main.h:
+    OVERVIEW:
+      This script is the original build automation that uses hardcoded COSMIC
+      command lines. It is maintained for backward compatibility and reference
+      but should NOT be used for new builds. The script does not read the STVD
+      project file; all build commands are fixed in the script itself.
+
+    KEY FEATURES:
+      • Self-contained: No dependency on STVD project file (.stp)
+      • Hardcoded COSMIC compiler and linker commands
+      • Direct COSMIC toolchain execution (cxstm8.exe, clnk.exe, chex.exe)
+      • No STVD IDE GUI invocation required
+
+    SIGNIFICANT LIMITATIONS:
+      • MUST BE MANUALLY UPDATED when source files change
+        - Adding new .c files requires hand-editing the script
+        - Removing .c files requires hand-editing the script
+      • MUST BE MANUALLY UPDATED when compiler flags change in STVD
+        - Changes in STVD project are NOT automatically reflected
+        - Maintainer must diff STVD project and update script
+      • BRITTLE to project changes
+        - Easy to introduce out-of-sync build conditions
+        - High risk of shipping incorrect firmware variants
+      • No linker command file sync with STVD LinkCommand
+      • Only suitable for reference or legacy systems that cannot use publish-release-stp.ps1
+
+    WHY USE publish-release-stp.ps1 INSTEAD:
+      • Reads STVD project file (.stp) - automatic detection of new source files
+      • Dynamic compiler flags - picks up STVD project changes automatically
+      • Reduced maintenance burden - no hand-editing of script when project changes
+      • Less error-prone - synchronization is automatic, not manual
+      • Recommended for all active development
+
+    PREREQUISITES (if you must use this script):
+      • COSMIC STM8 toolchain installed (or specify with -CosmicBinPath)
+        - Contains: cxstm8.exe, clnk.exe, chex.exe
+      • git CLI in PATH (for repository tagging and pushing)
+      • gh CLI in PATH (optional; required only for GitHub release if -SkipPublish not used)
+      • main.h with FIRMWARE_VERSION_MAJOR and FIRMWARE_VERSION_MINOR defines
+      • All hardcoded source files must exist (no auto-discovery)
+      • Run from inside git repository (default ProjectRoot = parent of build\ folder)
+
+    VERSION BEHAVIOR:
+      • If -Version is provided, it is used as the release tag version
+      • If -Version is omitted, version is auto-derived from main.h macros:
         v<FIRMWARE_VERSION_MAJOR>.<FIRMWARE_VERSION_MINOR>.0
 
-    Typical usage:
-      .\build\publish-release.ps1
-      .\build\publish-release.ps1 -SkipPublish -AllowDirty
-      .\build\publish-release.ps1 -Version v1.2.0
-      .\build\publish-release.ps1 -AllowDirty -Version v1.2.0
-      .\build\publish-release.ps1 -Preflight -SkipBuild
-      .\build\publish-release.ps1 -SkipPublish
+    TYPICAL USAGE (not recommended):
+      .\build\publish-release.ps1                           # Full release (build + tag + push + GitHub)
+      .\build\publish-release.ps1 -SkipPublish              # Build only (no git/GitHub)
+      .\build\publish-release.ps1 -SkipBuild                # Publish only (use existing artifacts)
+      .\build\publish-release.ps1 -Preflight                # Validate environment only
+      .\build\publish-release.ps1 -Version v1.2.0           # Build and publish with custom version
 
-    Optional flags:
-      -Draft        Create a draft GitHub release
-      -SkipBuild    Skip firmware build steps
-      -SkipPublish  Skip GitHub release publishing step
-      -Preflight    Validate prerequisites and inputs, then exit
-      -AllowDirty   Allow uncommitted changes in working tree
+    PARAMETERS:
+      -Draft              Create a draft GitHub release (not visible to public)
+      -SkipBuild          Skip firmware build steps; use existing Release_CC/CA artifacts
+      -SkipPublish        Skip git tag creation, push, and GitHub release (build only mode)
+      -Preflight          Validate prerequisites and project file, then exit (no build)
+      -AllowDirty         Allow uncommitted changes in working directory
+      -Version <string>   Custom version tag (format: v#.#.#); default: auto-derived from main.h
+      -CosmicBinPath      Path to COSMIC bin directory (auto-discovered if omitted)
+      -ProjectRoot        Project root path (defaults to parent of build\ folder)
+      -ProjectFile        STVD project file name (used for version extraction only)
+      -MainHeaderFile     Header file with FIRMWARE_VERSION_* defines (default: main.h)
+      -ReleaseNotesFile   Path to custom release notes file for gh release create
 
-    Optional file parameters:
-      -ProjectRoot      Project root path (defaults to build\..)
-      -ProjectFile      STVD project file (default: z80_tester.stp)
-      -MainHeaderFile   Header file with FIRMWARE_VERSION_* defines (default: main.h)
-      -ReleaseNotesFile Path to custom release notes for gh release create
-      -CosmicBinPath    Explicit folder containing cxstm8.exe/clnk.exe/chex.exe
+    HARDCODED BUILD COMMANDS:
+      This script contains hardcoded COSMIC invocations for:
+      • cxstm8.exe: Compiler with fixed flags (+mods0, +compact, -dDISPLAY_COMMON_ANODE, etc.)
+      • clnk.exe: Linker with hardcoded object file list
+      • chex.exe: Hex converter producing .s19 output
 
-    Change Log:
-      - 2026-04-26 dbychkov: Initial script header and release automation.
-      - 2026-04-26 dbychkov: Added auto-version from main.h and build folder root handling.
-      - 2026-04-26 dbychkov: Switched build flow to direct COSMIC headless commands.
+      If any of these commands need to change, the script source must be edited directly.
+      This is why publish-release-stp.ps1 is recommended - it extracts these from the .stp file.
+
+    DEPRECATION NOTICE:
+      This script is no longer actively maintained. All new development and builds
+      should use publish-release-stp.ps1 instead, which reads STVD project settings
+      and automatically adapts to project changes.
 #>
 
 param(
