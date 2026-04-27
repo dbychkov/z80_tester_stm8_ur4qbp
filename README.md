@@ -17,6 +17,138 @@ STM8S103F3P firmware for Z80 CPU Tester developed by UR4QBP.
 | 04/25/2026 | dbychkov | Translated all Russian comments to English in main.c and Si5351_i2c.h. |
 | 04/25/2026 | dbychkov | Added firmware version macros (FIRMWARE_VERSION_MAJOR/MINOR) to main.h. |
 
+## Building and Publishing Releases
+
+### Overview
+
+The project includes two PowerShell scripts for building firmware releases:
+
+1. **`publish-release-stp.ps1`** – Recommended script that reads the STVD project file (.stp) and invokes the COSMIC toolchain directly. Automatically detects source files and compiler settings from the project.
+2. **`publish-release.ps1`** – Original hardcoded script for reference/legacy support.
+
+### The publish-release-stp.ps1 Script
+
+This script builds Release_CC (common-cathode) and Release_CA (common-anode) firmware variants directly from the STVD project configuration without requiring the STVD GUI IDE.
+
+#### Key Features
+
+- **Reads STVD project file** (`z80_tester.stp`): Extracts compiler flags, source files, include paths, and output directories per configuration
+- **Dynamic compiler flags**: Derives `-dDISPLAY_COMMON_ANODE` and other flags from the .stp file; automatically picks up changes if STVD project settings are modified
+- **Auto-discovers new source files**: Any .c files added to the STVD project are automatically compiled and linked
+- **Direct toolchain execution**: Uses the COSMIC STM8 compiler (`cxstm8.exe`), linker (`clnk.exe`), and hex converter (`chex.exe`) instead of invoking the STVD IDE
+- **Git integration**: Creates version tags, pushes to repository, and publishes releases to GitHub
+- **Flexible build modes**: Can build only, publish only, or skip specific steps
+
+#### Prerequisites
+
+1. **COSMIC STM8 Toolchain** – Standard installation at `C:\Program Files (x86)\COSMIC\FSE_Compilers\CXSTM8\`
+   - Contains: `cxstm8.exe`, `clnk.exe`, `chex.exe`
+   - Can be overridden via `-CosmicBinPath` parameter
+
+2. **Git CLI** – Required for repository management and tagging
+
+3. **GitHub CLI (`gh`)** – Optional; required only if publishing to GitHub (not needed with `-SkipPublish`)
+
+#### Usage Examples
+
+```powershell
+# Full release: build both configs, create version tag, push to GitHub
+.\build\publish-release-stp.ps1
+
+# Build only (no git/GitHub operations)
+.\build\publish-release-stp.ps1 -SkipPublish
+
+# Publish only (skip build, use existing artifacts)
+.\build\publish-release-stp.ps1 -SkipBuild
+
+# Preflight check only (validate git state, COSMIC tools, project file)
+.\build\publish-release-stp.ps1 -Preflight
+
+# Allow uncommitted changes in working directory
+.\build\publish-release-stp.ps1 -AllowDirty
+
+# Use a custom version (instead of auto-deriving from main.h)
+.\build\publish-release-stp.ps1 -Version v1.2.3
+
+# Specify custom COSMIC toolchain location
+.\build\publish-release-stp.ps1 -CosmicBinPath C:\custom\cosmic\bin
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `-SkipPublish` | Switch | False | Skip all git operations (tag, push) and GitHub release |
+| `-SkipBuild` | Switch | False | Skip build; publish only (requires existing artifacts) |
+| `-Preflight` | Switch | False | Validate environment and exit without building |
+| `-AllowDirty` | Switch | False | Allow uncommitted changes in working directory |
+| `-Version` | String | Auto (from main.h) | Custom version string (e.g., `v1.2.3`) |
+| `-CosmicBinPath` | String | Auto-discovered | Path to COSMIC toolchain bin directory |
+
+#### Workflow
+
+1. **Preflight checks**:
+   - Validates git repository state (clean working directory unless `-AllowDirty`)
+   - Resolves COSMIC toolchain location
+   - Parses `z80_tester.stp` project file
+   - Auto-derives firmware version from `main.h` (unless `-Version` specified)
+
+2. **Build phase** (unless `-SkipBuild`):
+   - Extracts per-configuration compiler flags, include paths, and source file list from .stp
+   - For each configuration (Release_CC, Release_CA):
+     - Compiles all source files using `cxstm8.exe` with configuration-specific flags
+     - Generates linker command file (.lkf) from source list
+     - Links object files using `clnk.exe`
+     - Converts to S19 hex format using `chex.exe`
+   - Output artifacts:
+     - `Release_CC\z80_tester_cc.s19` (common-cathode firmware)
+     - `Release_CA\z80_tester_ca.s19` (common-anode firmware)
+
+3. **Publish phase** (unless `-SkipPublish`):
+   - Creates git tag: `v<MAJOR>.<MINOR>.0` (e.g., `v1.0.0`)
+   - Pushes branch and tag to remote
+   - Creates GitHub release with both .s19 artifacts attached
+
+#### Dynamic Compiler Flags
+
+The script extracts compiler flags directly from the STVD project's `CompileCommand` for each configuration. This means:
+
+- **Release_CC** uses: `-dDISPLAY_COMMON_ANODE=0` (common-cathode)
+- **Release_CA** uses: `-dDISPLAY_COMMON_ANODE=1` (common-anode)
+
+If you modify the project in STVD and change compiler flags, they will be picked up automatically on the next build without requiring script changes.
+
+#### Auto-Discovery of New Source Files
+
+When you add a new `.c` file to the STVD project:
+
+1. The script reads the updated source file list from the .stp file
+2. The new file is automatically compiled during the next build
+3. The new file is automatically included in the linker command file (.lkf)
+4. No script modification is needed
+
+**Note**: Header (.h) files are not auto-compiled; they must be included via `#include` in the source files that use them. Ensure proper include paths are configured in the STVD project if headers are in subdirectories.
+
+#### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "COSMIC toolchain not found" | Ensure `C:\Program Files (x86)\COSMIC\FSE_Compilers\CXSTM8\` exists, or specify `-CosmicBinPath` |
+| "Working directory not clean" | Commit changes to git or use `-AllowDirty` |
+| "z80_tester.stp not found" | Run script from the STM_Source directory (root of project) |
+| "Failed to parse .stp file" | Verify `z80_tester.stp` is valid INI format; check for corruption |
+| "GitHub release creation failed" | Ensure `gh` CLI is installed and authenticated; use `-SkipPublish` to skip GitHub |
+
+#### Relationship to publish-release.ps1
+
+The original `publish-release.ps1` script uses hardcoded COSMIC compiler and linker commands. It is maintained for backward compatibility but should not be used for new builds. Use `publish-release-stp.ps1` instead, which:
+
+- Automatically adapts to project changes
+- Reduces maintenance burden
+- Ensures consistency with STVD IDE project settings
+
+---
+
 ## Z80 Tester - Code Documentation
 
 ### Project Overview
